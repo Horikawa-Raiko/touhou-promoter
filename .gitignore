@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.spec
+*.exe
+
+# Virtual env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# NapCat binaries (too large for git, downloaded at runtime)
+napcat/
+
+# Claude AI
+.claude/
+
+# Sensitive / local config
+*.token
+*.secret
+.env
+%APPDATA%/touhou-promoter/config.json
+%APPDATA%/touhou-promoter/send_state.json
+
+# OS
+Thumbs.db
+.DS_Store
+Desktop.ini
