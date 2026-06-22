@@ -32,9 +32,7 @@ class OneBotHTTPClient:
 
     def _call(self, action: str, params: dict | None = None) -> Any:
         url = f"{self._base}/{action}"
-        payload = {}
-        if params:
-            payload["params"] = params
+        payload = params or {}
         try:
             resp = self._session.post(url, json=payload, timeout=self._timeout)
             resp.raise_for_status()
