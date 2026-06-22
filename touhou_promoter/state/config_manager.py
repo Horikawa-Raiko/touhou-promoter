@@ -17,7 +17,17 @@ class AppConfig:
     recall_interval: float = 0.6             # 撤回间隔（秒）
     listener_expiry_seconds: int = 1200      # 发送后监听过期时间（秒），默认20分钟
     last_self_id: str = ""                   # 上次登录的QQ号
+    last_self_nick: str = ""                 # 上次登录的QQ昵称
     last_token_path: str = ""                # 上次NapCat token路径（复用登录）
+    dark_mode: bool = True                   # 深色/浅色主题（默认深色）
+    # LLM配置
+    local_model_path: str = ""               # 本地GGUF模型路径
+    local_n_ctx: int = 2048                  # 本地模型上下文窗口
+    local_n_threads: int = 4                 # 本地模型推理线程数
+    cloud_endpoint: str = ""                 # 云端API端点
+    cloud_api_key: str = ""                  # 云端API密钥
+    cloud_model: str = ""                    # 云端模型名
+    cloud_max_tokens: int = 256              # 云端最大token数
 
 
 class ConfigManager:

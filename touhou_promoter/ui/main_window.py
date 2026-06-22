@@ -6,9 +6,9 @@ from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTreeWidget, QTreeWidgetItem, QTextEdit, QPushButton,
     QProgressBar, QPlainTextEdit, QStatusBar, QMessageBox, QGroupBox,
-    QFileDialog, QScrollArea,
+    QFileDialog, QScrollArea, QLineEdit, QMenu, QApplication,
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap
 
 from touhou_promoter.state.app_state import AppState
@@ -19,7 +19,9 @@ from touhou_promoter.core.napcat_bootstrap import ensure_napcat_ready
 from touhou_promoter.core.onebot_client import OneBotHTTPClient
 from touhou_promoter.core.onebot_adapter import build_intersection
 from touhou_promoter.ui.workers import SendWorker, RecallWorker
-
+from touhou_promoter.ui.settings_dialog import SettingsDialog
+from touhou_promoter.core.post_send_listener import PostSendListener
+from touhou_promoter.ui.listener_panel import ListenerPanel
 
 class NapCatSetupWorker(QThread):
     """在子线程中搜索/下载 NapCat，避免阻塞 GUI"""
@@ -45,7 +47,6 @@ class NapCatSetupWorker(QThread):
                 self.failed.emit("NapCat 安装失败，请检查网络连接后重试")
         except Exception as e:
             self.failed.emit(str(e))
-
 
 class MainWindow(QMainWindow):
     """东方Project一键宣发姬 主窗口"""
@@ -610,11 +611,17 @@ class MainWindow(QMainWindow):
         self._send_worker: SendWorker | None = None
         self._recall_worker: RecallWorker | None = None
         self._last_sent_ids: dict[str, str] = {}  # 上次发送的 message_id 映射
-        self._dark_mode = True  # 默认深色，与 _THEME 一致
+        self._post_listener: PostSendListener | None = None
+        self._listener_panel: ListenerPanel | None = None
+        self._image_paths: list[str] = []  # ordered list of image file paths
+        self._b64_to_path: dict[str, str] = {}  # base64 data -> file path mapping
+        self._dark_mode = self._config_mgr.config.dark_mode
+
+        self._log_entries: list[tuple[str, str]] = []  # [(msg, level), ...]
 
         self.setWindowTitle("东方Project一键宣发姬")
         self.resize(1100, 720)
-        self.setStyleSheet(self._THEME)
+        self.setStyleSheet(self._THEME if self._dark_mode else self._THEME_LIGHT)
 
         self._build_menu()
         self._build_ui()
@@ -637,6 +644,34 @@ class MainWindow(QMainWindow):
                 self._append_log(f"[CSV] 自动加载失败: {e}")
 
     # ================================================================
+    # 窗口关闭 → 清理
+    # ================================================================
+    def closeEvent(self, event):
+        """窗口关闭时停止所有后台任务并退出NapCat"""
+        # 停止发送/撤回线程
+        if self._send_worker and self._send_worker.isRunning():
+            self._send_worker.stop()
+            self._send_worker.quit()
+            self._send_worker.wait(3000)
+        if self._recall_worker and self._recall_worker.isRunning():
+            self._recall_worker.stop()
+            self._recall_worker.quit()
+            self._recall_worker.wait(3000)
+
+        # 停止监听线程
+        self._stop_post_listener()
+
+        # 监听面板随窗口关闭
+
+        # 停止 NapCat (连带 QQ.exe)
+        self._login_poll_active = False
+        if self._napcat:
+            self._napcat.stop()
+            self._napcat = None
+
+        super().closeEvent(event)
+
+    # ================================================================
     # 菜单栏
     # ================================================================
     def _build_menu(self):
@@ -650,7 +685,8 @@ class MainWindow(QMainWindow):
         settings_menu.addAction("NapCat路径...", self._on_napcat_path)
         settings_menu.addAction("发送参数...", self._on_send_params)
         settings_menu.addSeparator()
-        self._theme_action = settings_menu.addAction("☀ 切换亮色主题", self._on_toggle_theme)
+        theme_label = "☀ 切换亮色主题" if self._dark_mode else "🌙 切换深色主题"
+        self._theme_action = settings_menu.addAction(theme_label, self._on_toggle_theme)
 
         help_menu = mb.addMenu("帮助(&H)")
         help_menu.addAction("关于...", self._on_about)
@@ -721,6 +757,13 @@ class MainWindow(QMainWindow):
         group_group = QGroupBox("📋 群列表")
         group_layout = QVBoxLayout(group_group)
         group_layout.setSpacing(6)
+
+        self.group_search = QLineEdit()
+        self.group_search.setPlaceholderText("搜索群名称或群号...")
+        self.group_search.setClearButtonEnabled(True)
+        self.group_search.setStyleSheet("padding: 4px 8px; font-size: 12px;")
+        group_layout.addWidget(self.group_search)
+
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
         self.select_all_btn = QPushButton("全选")
@@ -733,6 +776,7 @@ class MainWindow(QMainWindow):
         self.group_tree.setHeaderLabels(["分类 / 群名称", "群号"])
         self.group_tree.setColumnWidth(0, 240)
         self.group_tree.setAlternatingRowColors(True)
+        self.group_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.group_selection_label = QLabel("已选: 0 / 0 群（登录后可刷新交集）")
         self.group_selection_label.setStyleSheet("font-size: 12px; background: transparent;")
         group_layout.addLayout(toolbar)
@@ -742,84 +786,110 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(left)
 
-        # === 右侧面板 ===
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(8, 8, 8, 8)
-        right_layout.setSpacing(8)
+        # === 中间：消息编辑器（独立一栏，纵向排版，手机QQ风格）===
+        msg_editor = QWidget()
+        msg_editor.setObjectName("msgEditor")
+        me_layout = QVBoxLayout(msg_editor)
+        me_layout.setContentsMargins(4, 4, 4, 4)
+        me_layout.setSpacing(4)
 
-        # -- 消息编辑区 --
-        msg_group = QGroupBox("✏️ 消息编辑")
-        msg_layout = QVBoxLayout(msg_group)
-        msg_layout.setSpacing(6)
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(6)
-        self.insert_image_btn = QPushButton("🖼️ 插入图片")
-        self.preview_btn = QPushButton("预览")
-        self.clear_msg_btn = QPushButton("清空")
+        # 标题栏
+        me_header = QHBoxLayout()
+        me_title = QLabel("消息编辑")
+        me_title.setStyleSheet("font-weight: bold; font-size: 12px; background: transparent;")
+        me_header.addWidget(me_title)
+        me_header.addStretch()
         self.char_count_label = QLabel("字数: 0")
-        self.char_count_label.setStyleSheet("font-size: 12px; background: transparent;")
-        toolbar.addWidget(self.insert_image_btn)
-        toolbar.addWidget(self.preview_btn)
-        toolbar.addWidget(self.clear_msg_btn)
-        toolbar.addStretch()
-        toolbar.addWidget(self.char_count_label)
-        self.message_edit = QTextEdit()
-        self.message_edit.setPlaceholderText("在此输入要群发的消息内容...")
-        self.message_edit.setMaximumHeight(180)
-        msg_layout.addLayout(toolbar)
-        msg_layout.addWidget(self.message_edit)
-        right_layout.addWidget(msg_group)
+        self.char_count_label.setStyleSheet("font-size: 11px; background: transparent;")
+        me_header.addWidget(self.char_count_label)
+        me_layout.addLayout(me_header)
 
-        # -- 发送控制区 --
-        send_group = QGroupBox("📤 发送控制")
-        send_layout = QVBoxLayout(send_group)
-        send_layout.setSpacing(6)
-        info_row = QHBoxLayout()
-        self.target_label = QLabel("目标群: 0")
-        self.target_label.setStyleSheet("font-weight: bold; font-size: 13px; background: transparent;")
+        # 富文本消息编辑区（文本+图片混排，所见即所得）
+        self.message_edit = QTextEdit()
+        self.message_edit.setAcceptRichText(True)
+        self.message_edit.setPlaceholderText("在此输入消息...\n拖拽图片到编辑区即可插入")
+        self.message_edit.setStyleSheet(
+            "QTextEdit { padding: 8px; font-size: 13px; }"
+        )
+        self.message_edit.textChanged.connect(self._on_message_changed)
+        # 拖拽图片支持
+        self.message_edit.setAcceptDrops(True)
+        self.message_edit.dragEnterEvent = self._on_editor_drag_enter
+        self.message_edit.dropEvent = self._on_editor_drop
+        me_layout.addWidget(self.message_edit, 1)
+
+        # 按钮栏
+        me_btn_row = QHBoxLayout()
+        me_btn_row.setSpacing(6)
+        self.insert_image_btn = QPushButton("图片")
+        self.insert_image_btn.setToolTip("选择图片文件插入到光标位置")
+        self.insert_image_btn.clicked.connect(self._on_insert_image)
+        self.clear_msg_btn = QPushButton("清空")
+        self.clear_msg_btn.clicked.connect(self._clear_message)
+        me_btn_row.addWidget(self.insert_image_btn)
+        me_btn_row.addWidget(self.clear_msg_btn)
+        me_btn_row.addStretch()
+
+        # 发送参数标签
         self.interval_label = QLabel(
             f"间隔 {self._config_mgr.config.send_interval}s "
             f"| 每{self._config_mgr.config.batch_pause_every}个停"
             f"{self._config_mgr.config.batch_pause_seconds}s"
         )
-        self.interval_label.setStyleSheet("font-size: 12px; background: transparent;")
-        info_row.addWidget(self.target_label)
-        info_row.addStretch()
-        info_row.addWidget(self.interval_label)
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-        self.recall_btn = QPushButton("◀ 撤回上次")
-        self.recall_btn.setObjectName("recallBtn")
-        self.send_btn = QPushButton("▶ 开始发送")
+        self.interval_label.setStyleSheet("font-size: 11px; background: transparent;")
+        me_btn_row.addWidget(self.interval_label)
+
+        self.target_label = QLabel("目标: 0")
+        self.target_label.setStyleSheet("font-weight: bold; font-size: 12px; background: transparent;")
+        me_btn_row.addWidget(self.target_label)
+
+        self.send_btn = QPushButton("发送")
         self.send_btn.setObjectName("sendBtn")
-        self.stop_btn = QPushButton("■ 中断")
+        self.send_btn.clicked.connect(self._on_send_clicked)
+        self.stop_btn = QPushButton("中断")
         self.stop_btn.setObjectName("stopBtn")
         self.stop_btn.setEnabled(False)
-        btn_row.addWidget(self.recall_btn)
-        btn_row.addStretch()
-        btn_row.addWidget(self.send_btn)
-        btn_row.addWidget(self.stop_btn)
+        self.recall_btn = QPushButton("撤回")
+        self.recall_btn.setObjectName("recallBtn")
+        self.recall_btn.clicked.connect(self._on_recall_clicked)
+        me_btn_row.addWidget(self.send_btn)
+        me_btn_row.addWidget(self.stop_btn)
+        me_btn_row.addWidget(self.recall_btn)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
-        send_layout.addLayout(info_row)
-        send_layout.addLayout(btn_row)
-        send_layout.addWidget(self.progress_bar)
-        right_layout.addWidget(send_group)
+        self.progress_bar.setTextVisible(True)
 
-        # -- 日志区 --
-        log_group = QGroupBox("📜 发送日志")
+        me_layout.addLayout(me_btn_row)
+        me_layout.addWidget(self.progress_bar)
+
+        splitter.addWidget(msg_editor)
+
+        # === 右侧：监听面板 + 日志（竖向分割）===
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(4, 4, 4, 4)
+        right_layout.setSpacing(4)
+
+        # ── 监听面板 ──
+        self._listener_panel = ListenerPanel(dark_mode=self._dark_mode,
+                                             self_nick=self._config_mgr.config.last_self_nick)
+        self._listener_panel.reply_requested.connect(self._on_listener_reply)
+        right_layout.addWidget(self._listener_panel, 1)
+
+        # ── 日志区 ──
+        log_group = QGroupBox("发送日志")
         log_layout = QVBoxLayout(log_group)
-        self.log_view = QPlainTextEdit()
+        log_layout.setContentsMargins(4, 4, 4, 4)
+        self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
-        self.log_view.setMaximumBlockCount(500)
-        self.log_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
-        self.log_view.setMaximumWidth(600)
+        self.log_view.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self._log_max_lines = 500
         log_layout.addWidget(self.log_view)
-        right_layout.addWidget(log_group)
+        right_layout.addWidget(log_group, 1)
 
         splitter.addWidget(right)
-        splitter.setSizes([340, 740])
+        splitter.setSizes([280, 380, 420])
 
         main_layout = QHBoxLayout(central)
         main_layout.addWidget(splitter)
@@ -901,6 +971,11 @@ class MainWindow(QMainWindow):
         r"\[WS\]",                   # WebSocket 日志
         r"POST\s+/",                 # HTTP POST 请求路径
         r"API.*调用|call.*api",      # API 调用
+        r"私聊",                     # 私聊消息日志
+        r"输入状态",                 # 对方正在输入状态通知
+        r"\[Notice\]",               # 系统通知
+        r"发送\s*->",               # Bot 自身发送消息日志
+        r"里面贴的|链接.*失效|视频.*没了|贴子.*删除|主题.*已删",  # 贴吧/链接预览内容
     ]
 
     def _on_napcat_log_line(self, line: str):
@@ -912,6 +987,9 @@ class MainWindow(QMainWindow):
         for pattern in self._NAPCAT_LOG_SUPPRESS:
             if re.search(pattern, clean, re.IGNORECASE):
                 return
+        # 过滤不匹配标准日志格式的行（链接预览内容等）
+        if not re.search(r"^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+\[", clean):
+            return
         self._append_log(f"[NapCat] {clean}")
 
     def _on_napcat_status(self, status: str):
@@ -983,18 +1061,15 @@ class MainWindow(QMainWindow):
     def _connect_ui_signals(self):
         self.login_btn.clicked.connect(self._on_login_clicked)
         self.logout_btn.clicked.connect(self._on_logout_clicked)
-        self.send_btn.clicked.connect(self._on_send_clicked)
         self.stop_btn.clicked.connect(self._on_stop_clicked)
-        self.recall_btn.clicked.connect(self._on_recall_clicked)
-        self.message_edit.textChanged.connect(self._on_message_changed)
         self.refresh_groups_btn.clicked.connect(self._auto_refresh_intersection)
         self.select_all_btn.clicked.connect(self._on_select_all)
         self.deselect_all_btn.clicked.connect(self._on_deselect_all)
         self.group_tree.itemChanged.connect(self._on_tree_item_changed)
         self.group_tree.itemPressed.connect(self._on_tree_item_pressed)
         self.group_tree.itemClicked.connect(self._on_tree_item_clicked)
-        self.clear_msg_btn.clicked.connect(lambda: self.message_edit.clear())
-        self.preview_btn.clicked.connect(self._on_preview)
+        self.group_tree.customContextMenuRequested.connect(self._on_tree_context_menu)
+        self.group_search.textChanged.connect(self._on_group_search)
 
     # ---- 登录 ----
     def _on_login_clicked(self):
@@ -1045,7 +1120,7 @@ class MainWindow(QMainWindow):
             return
 
         class LoginCheckWorker(QThread):
-            login_result = pyqtSignal(bool, str)
+            login_result = pyqtSignal(bool, str, str)  # (ok, uid, nickname)
 
             def run(self_):
                 try:
@@ -1053,28 +1128,30 @@ class MainWindow(QMainWindow):
                     info = client.get_login_info()
                     uid = str(info.get("user_id", ""))
                     nickname = info.get("nickname", "")
-                    label = f"{nickname} ({uid})" if nickname else uid
-                    self_.login_result.emit(True, label)
+                    self_.login_result.emit(True, uid, nickname)
                 except Exception as e:
-                    self_.login_result.emit(False, str(e))
+                    self_.login_result.emit(False, "", str(e))
 
         self._login_checker = LoginCheckWorker()
         self._login_checker.login_result.connect(self._on_login_poll_result)
         self._login_checker.start()
 
-    def _on_login_poll_result(self, ok: bool, info: str):
+    def _on_login_poll_result(self, ok: bool, uid: str, nickname: str):
         if not getattr(self, "_login_poll_active", True):
             return
         if ok:
             self._login_poll_active = False
-            self._state.login_status_changed.emit(True, info)
+            self._config_mgr.config.last_self_id = uid
+            self._config_mgr.config.last_self_nick = nickname
+            self._config_mgr.save()
+            label = f"{nickname} ({uid})" if nickname else uid
+            self._state.login_status_changed.emit(True, label)
             return
 
         self._login_retry_count += 1
         if self._login_retry_count < self._login_retry_max:
             if self._login_retry_count <= 5 or self._login_retry_count % 10 == 0:
                 self._append_log(f"[登录] 等待中... ({self._login_retry_count}/{self._login_retry_max})")
-            from PyQt6.QtCore import QTimer
             QTimer.singleShot(2000, self._start_login_poll)
         else:
             self._append_log(f"[登录] 超时：{self._login_retry_max}次尝试后仍未连接")
@@ -1120,7 +1197,6 @@ class MainWindow(QMainWindow):
             self._napcat.stop()
 
         # 等进程完全退出后再重启（给 taskkill 足够清理时间）
-        from PyQt6.QtCore import QTimer
         QTimer.singleShot(3000, lambda: self._restart_with_quick_login(qq))
 
     def _restart_with_quick_login(self, qq: str):
@@ -1270,6 +1346,20 @@ class MainWindow(QMainWindow):
             self._append_log("[群列表] 请先登录")
             return
 
+        # 自动重新加载CSV（用户可能外部编辑了CSV文件）
+        csv_path = self._config_mgr.config.csv_path
+        if csv_path and os.path.isfile(csv_path):
+            try:
+                from touhou_promoter.core.csv_loader import load_groups
+                records = load_groups(csv_path)
+                self._csv_records = records
+                self._csv_groups = {r.group_id for r in records}
+            except Exception:
+                pass  # CSV读取失败则用旧数据
+        elif not self._csv_records:
+            self._append_log("[群列表] 请先通过 文件→加载CSV 加载群列表")
+            return
+
         class IntersectionWorker(QThread):
             result_ready = pyqtSignal(set)
             error_msg = pyqtSignal(str)
@@ -1392,6 +1482,67 @@ class MainWindow(QMainWindow):
         self._pre_click_item = None
         self._pre_click_state = None
 
+    def _on_tree_context_menu(self, pos):
+        """右键菜单"""
+        item = self.group_tree.itemAt(pos)
+        if not item or not item.data(0, Qt.ItemDataRole.UserRole):
+            return
+        record = item.data(0, Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
+        copy_action = menu.addAction(f"📋 复制群号: {record.group_id}")
+        info_action = menu.addAction(f"ℹ️ 查看详情")
+        menu.addSeparator()
+        exclude_action = menu.addAction("🚫 排除此群")
+
+        action = menu.exec(self.group_tree.mapToGlobal(pos))
+        if action == copy_action:
+            QApplication.clipboard().setText(record.group_id)
+            self._append_log(f"已复制群号: {record.group_id}")
+        elif action == info_action:
+            QMessageBox.information(
+                self, "群详情",
+                f"群名称: {record.group_name or '-'}\n"
+                f"群号: {record.group_id}\n"
+                f"大类: {record.category}\n"
+                f"小类: {record.subcategory or record.region or record.school or '-'}\n"
+                f"地点: {record.location or '-'}\n"
+                f"活动: {record.event_name or '-'}\n"
+                f"说明: {record.note or '-'}"
+            )
+        elif action == exclude_action:
+            item.setCheckState(0, Qt.CheckState.Unchecked)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            self._update_parent_check_state(item.parent() or self.group_tree.invisibleRootItem())
+            self._update_selection_count()
+            self._append_log(f"已排除群: {record.display_label()}", "warning")
+
+    def _on_group_search(self, text: str):
+        """搜索过滤群列表"""
+        t = text.strip().lower()
+        for i in range(self.group_tree.topLevelItemCount()):
+            cat_item = self.group_tree.topLevelItem(i)
+            cat_visible = False
+            for j in range(cat_item.childCount()):
+                sub_item = cat_item.child(j)
+                sub_visible = False
+                for k in range(sub_item.childCount()):
+                    leaf = sub_item.child(k)
+                    if not t:
+                        leaf.setHidden(False)
+                        sub_visible = True
+                        continue
+                    record = leaf.data(0, Qt.ItemDataRole.UserRole)
+                    label = leaf.text(0)
+                    gid = leaf.text(1)
+                    match = (t in label.lower() or t in gid) if record else True
+                    leaf.setHidden(not match)
+                    if match:
+                        sub_visible = True
+                sub_item.setHidden(not sub_visible)
+                if sub_visible:
+                    cat_visible = True
+            cat_item.setHidden(not cat_visible)
+
     def _propagate_check_state(self, parent: QTreeWidgetItem, state):
         """递归设置所有子节点的勾选状态"""
         for i in range(parent.childCount()):
@@ -1468,10 +1619,14 @@ class MainWindow(QMainWindow):
     # ---- 发送 ----
     def _on_send_clicked(self):
         """开始群发：收集选中群 → 确认 → 启动 SendWorker"""
-        text = self.message_edit.toPlainText().strip()
-        if not text:
+        # 检查是否有内容
+        html = self.message_edit.toHtml()
+        if not self.message_edit.toPlainText().strip() and "<img " not in html:
             QMessageBox.warning(self, "提示", "请输入要发送的消息内容")
             return
+
+        # 从富文本编辑器提取 CQ 码消息
+        message = self._build_send_message()
 
         # 收集选中的叶子群
         targets = self._collect_checked_targets()
@@ -1480,16 +1635,23 @@ class MainWindow(QMainWindow):
             return
 
         total = len(targets)
-        # 计算预计耗时
+        # 计算预计耗时（用最新配置）
+        self._refresh_config()
         cfg = self._config_mgr.config
         est_seconds = total * (cfg.send_interval + cfg.send_interval_jitter / 2)
         est_seconds += (total // cfg.batch_pause_every) * cfg.batch_pause_seconds if cfg.batch_pause_every else 0
         est_str = f"{int(est_seconds // 60)}分{int(est_seconds % 60)}秒" if est_seconds >= 60 else f"{int(est_seconds)}秒"
 
+        # 确认对话框摘要
+        img_count = html.count("<img ")
+        plain = self.message_edit.toPlainText().strip()
+        summary = f"{img_count}张图片" if img_count else ""
+        if plain:
+            summary = f"{summary} + 文本" if summary else plain[:80]
         reply = QMessageBox.question(
             self, "确认发送",
             f"即将向 {total} 个群发送消息：\n\n"
-            f"「{text[:80]}{'...' if len(text) > 80 else ''}」\n\n"
+            f"「{summary}{'...' if plain and len(plain) > 80 else ''}」\n\n"
             f"预计耗时: {est_str}\n\n"
             f"确定开始发送？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -1497,10 +1659,6 @@ class MainWindow(QMainWindow):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-
-        # 构建消息
-        from touhou_promoter.core.message_builder import build_message
-        message = text  # 纯文本直接用字符串
 
         self._send_btn_enabled(False)
         self._append_log(f"[发送] 开始向 {total} 个群发送消息...")
@@ -1524,6 +1682,9 @@ class MainWindow(QMainWindow):
                 return
             self._send_worker.stop()
             self._append_log("[发送] 正在中断...")
+            # 中断发送 → 终止监听
+            self._stop_post_listener()
+            
         elif self._recall_worker and self._recall_worker.isRunning():
             self._recall_worker.stop()
             self._append_log("[撤回] 正在中断...")
@@ -1585,40 +1746,57 @@ class MainWindow(QMainWindow):
         self.progress_bar.setMaximum(total)
 
         if status == "sending":
-            self._append_log(f"[发送] → {group_name} ...")
+            self._append_log(f"→ {group_name} ...")
         elif status == "ok":
-            self._append_log(f"[发送] ✓ {group_name} — 成功")
+            self._append_log(f"✓ {group_name} — 成功", "success")
         elif status.startswith("fail:"):
             reason = status[5:]
-            self._append_log(f"[发送] ✗ {group_name} — {reason}")
+            self._append_log(f"✗ {group_name} — {reason}", "error")
         elif status == "pausing":
-            self._append_log(f"[发送] ⏸ {group_name}")
+            self._append_log(f"⏸ {group_name}", "warning")
         elif status.startswith("recall:ok"):
-            self._append_log(f"[撤回] ✓ 群{group_name} — 已撤回")
+            self._append_log(f"✓ 群{group_name} — 已撤回", "success")
         elif status.startswith("recall:fail:"):
             reason = status[11:]
-            self._append_log(f"[撤回] ✗ 群{group_name} — {reason}")
+            self._append_log(f"✗ 群{group_name} — {reason}", "error")
 
     def _on_send_completed(self, success: int, failed: int):
         """发送/撤回完成"""
+        is_recall = self._recall_worker is not None
         self._send_btn_enabled(True)
         self.progress_bar.setValue(self.progress_bar.maximum())
-        self._append_log(f"[发送] 完成! 成功: {success}, 失败: {failed}")
 
-        if self._send_worker and hasattr(self._send_worker, "_engine") and self._send_worker._engine:
-            self._last_sent_ids = dict(self._send_worker._engine._sent_message_ids)
+        if is_recall:
+            # 撤回完成 → 终止监听，清空记录
+            self._append_log(f"[撤回] 完成! 成功: {success}, 失败: {failed}",
+                             "success" if failed == 0 else "warning")
+            self._last_sent_ids.clear()
+            self._stop_post_listener()
+            
+            if self._listener_panel:
+                self._listener_panel.clear()
+        else:
+            self._append_log(f"完成! 成功: {success}, 失败: {failed}",
+                             "success" if failed == 0 else "warning")
+            if self._send_worker and hasattr(self._send_worker, "_engine") and self._send_worker._engine:
+                self._last_sent_ids = dict(self._send_worker._engine._sent_message_ids)
+            self.status_last_send.setText(
+                f"上次发送: {datetime.now().strftime('%H:%M')} ({success}成功/{failed}失败)"
+            )
+            # 启动发送后监听
+            self._start_post_send_listener()
 
-        self.status_last_send.setText(
-            f"上次发送: {datetime.now().strftime('%H:%M')} ({success}成功/{failed}失败)"
-        )
         self._send_worker = None
         self._recall_worker = None
+
+        # 3秒后重置进度条
+        QTimer.singleShot(3000, lambda: self.progress_bar.reset())
 
     def _on_send_interrupted(self, sent: int):
         """发送被中断"""
         self._send_btn_enabled(True)
         self.progress_bar.setValue(0)
-        self._append_log(f"[发送] 已中断，已发送 {sent} 条消息（未发送的群可在断点恢复后继续）")
+        self._append_log(f"已中断，已发送 {sent} 条消息（未发送的群可在断点恢复后继续）", "warning")
 
         if self._send_worker and hasattr(self._send_worker, "_engine") and self._send_worker._engine:
             self._last_sent_ids = dict(self._send_worker._engine._sent_message_ids)
@@ -1628,6 +1806,80 @@ class MainWindow(QMainWindow):
         )
         self._send_worker = None
 
+    def _start_post_send_listener(self):
+        """发送完成后启动回复监听（如果配置了监听时长）。
+
+        每次新的发送都会停止上次监听，重置缓存，只监听最新一次发送的回复。
+        """
+        duration = self._config_mgr.config.listener_expiry_seconds
+        if duration <= 0 or not self._last_sent_ids:
+            return
+
+        # 停止之前可能还在运行的监听
+        self._stop_post_listener()
+
+        # 重置监听窗口（新的发送周期）
+        if self._listener_panel:
+            self._listener_panel.clear()
+
+        target_gids = {gid for gid in self._last_sent_ids}
+        self_id = self._config_mgr.config.last_self_id
+
+        self._append_log(f"👂 发送后监听已启动（{duration}秒），监控目标群中的回复...", "info")
+
+        self._post_listener = PostSendListener(
+            target_group_ids=target_gids,
+            duration_seconds=duration,
+            self_id=self_id,
+        )
+        self._post_listener.hit_detected.connect(self._on_listener_hit)
+        self._post_listener.ws_error.connect(
+            lambda err: self._append_log(f"👂 监听器错误: {err}", "error")
+        )
+        self._post_listener.finished.connect(self._on_listener_finished)
+        self._post_listener.start()
+        
+
+    def _stop_post_listener(self):
+        """停止当前运行的监听器"""
+        if self._post_listener and self._post_listener.isRunning():
+            self._post_listener.stop_listening()
+        self._post_listener = None
+
+    def _on_listener_hit(self, group_id: str, group_name: str, user_nick: str, message: str, elapsed: int):
+        """监听命中 — 写入主日志 + 注入嵌入式监听面板"""
+        # 从 CSV 缓存解析群名
+        if not group_name:
+            for r in self._csv_records:
+                if r.group_id == group_id:
+                    group_name = r.group_name or group_id
+                    break
+            if not group_name:
+                group_name = group_id
+        preview = message[:80] + ('...' if len(message) > 80 else '')
+        self._append_log(f"👂 群{group_name} {user_nick}: {preview}", "join")
+        if self._listener_panel:
+            self._listener_panel.add_message(group_id, group_name, user_nick, message)
+
+    def _on_listener_finished(self):
+        """监听结束"""
+        hits = self._post_listener.hits() if self._post_listener else []
+        if hits:
+            self._append_log(f"👂 监听结束，共收到 {len(hits)} 条相关回复", "info")
+        else:
+            self._append_log("👂 监听结束，未收到相关回复", "info")
+
+    def _on_listener_reply(self, group_id: str, text: str):
+        """监听面板请求回复 → 调用 API 发送"""
+        try:
+            client = OneBotHTTPClient()
+            from touhou_promoter.core.forwarding_engine import parse_message_to_segments
+            segs = parse_message_to_segments(text)
+            client.send_group_msg(group_id, segs, auto_escape=False)
+            self._append_log(f"💬 回复群{group_id}: {text[:40]}", "success")
+        except Exception as e:
+            self._append_log(f"💬 回复失败: {e}", "error")
+
     def _send_btn_enabled(self, enabled: bool):
         """设置发送相关按钮状态"""
         self.send_btn.setEnabled(enabled)
@@ -1635,22 +1887,110 @@ class MainWindow(QMainWindow):
         self.recall_btn.setEnabled(enabled)
 
     def _on_message_changed(self):
-        text = self.message_edit.toPlainText()
-        self.char_count_label.setText(f"字数: {len(text)}")
+        """文本变化 -> 更新字数"""
+        # Count text only (strip HTML tags for image-only messages)
+        html = self.message_edit.toHtml()
+        text = self.message_edit.toPlainText().strip()
+        img_count = html.count("<img ")
+        if text:
+            self.char_count_label.setText(f"字数: {len(text.replace(chr(10),''))}")
+        elif img_count:
+            self.char_count_label.setText(f"图片: {img_count}张")
+        else:
+            self.char_count_label.setText("字数: 0")
 
-    def _on_preview(self):
-        """预览消息内容"""
-        text = self.message_edit.toPlainText()
-        if not text.strip():
-            QMessageBox.information(self, "预览", "消息内容为空")
-            return
-        target = self.target_label.text()
-        QMessageBox.information(
-            self, "消息预览",
-            f"目标: {target}\n"
-            f"字数: {len(text)}\n\n"
-            f"{text[:500]}{'...' if len(text) > 500 else ''}"
+    # ── 图片操作 ──
+
+    def _on_insert_image(self):
+        """选择图片文件，插入到光标位置"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择图片", "",
+            "图片文件 (*.png *.jpg *.jpeg *.gif *.bmp *.webp);;所有文件 (*.*)"
         )
+        if not path:
+            return
+        self._insert_image_at_cursor(path)
+
+    def _insert_image_at_cursor(self, path: str):
+        """将图片以base64嵌入QTextEdit当前光标处"""
+        import base64 as _b64
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            b64 = _b64.b64encode(data).decode()
+        except Exception:
+            self._append_log(f"[错误] 无法读取图片: {path}", "error")
+            return
+        ext = os.path.splitext(path)[1].lower()
+        mime_map = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg",
+                    ".gif": "gif", ".webp": "webp", ".bmp": "bmp"}
+        mime = mime_map.get(ext, "png")
+
+        self._image_paths.append(path)
+        self._b64_to_path[b64] = path
+
+        cursor = self.message_edit.textCursor()
+        cursor.insertHtml(
+            f'<img src="data:image/{mime};base64,{b64}" '
+            f'style="max-width:200px;border-radius:8px;margin:4px 2px" '
+            f'title="{os.path.basename(path)}">'
+        )
+        self._append_log(f"已插入图片: {os.path.basename(path)}")
+
+    def _clear_message(self):
+        """清空消息文本和所有图片"""
+        self.message_edit.clear()
+        self._image_paths.clear()
+        self._b64_to_path.clear()
+        self.char_count_label.setText("字数: 0")
+
+    # ── 拖拽图片到编辑器 ──
+
+    def _on_editor_drag_enter(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def _on_editor_drop(self, event):
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp')):
+                # Move cursor to drop position then insert
+                cursor = self.message_edit.cursorForPosition(event.position().toPoint())
+                self.message_edit.setTextCursor(cursor)
+                self._insert_image_at_cursor(path)
+
+    # ── 提取消息用于发送 ──
+
+    def _build_send_message(self) -> str:
+        """从富文本编辑器中提取 CQ码格式的消息字符串"""
+        import re as _re
+
+        html = self.message_edit.toHtml()
+        # Only process body content (strip Qt's <html><head>... preamble)
+        body_match = _re.search(r'<body[^>]*>(.*)</body>', html, _re.DOTALL)
+        if body_match:
+            html = body_match.group(1)
+        # Walk through HTML: img tags -> [CQ:image], text -> plain text
+        parts = []
+        pos = 0
+        img_re = _re.compile(r'<img\s+[^>]*?src="data:image/[^;]+;base64,([^"]+)"[^>]*>')
+        for m in img_re.finditer(html):
+            text_html = html[pos:m.start()]
+            text = _re.sub(r'<[^>]+>', '', text_html)
+            text = text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+            if text.strip():
+                parts.append(text.strip())
+            b64 = m.group(1)
+            filepath = self._b64_to_path.get(b64, "")
+            if filepath:
+                parts.append(f"[CQ:image,file={filepath}]")
+            pos = m.end()
+        text_html = html[pos:]
+        text = _re.sub(r'<[^>]+>', '', text_html)
+        text = text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        if text.strip():
+            parts.append(text.strip())
+        return "".join(parts) if parts else ""
 
     # ---- 设置 ----
     def _on_napcat_path(self):
@@ -1664,7 +2004,23 @@ class MainWindow(QMainWindow):
             self._append_log(f"[设置] NapCat路径已设为: {path}")
 
     def _on_send_params(self):
-        self._append_log("[设置] 发送参数设置将在后续版本完善")
+        dlg = SettingsDialog(self)
+        if dlg.exec() == SettingsDialog.DialogCode.Accepted:
+            self._refresh_config()
+            self._append_log("[设置] 发送参数已更新")
+            self._update_interval_label()
+
+    def _refresh_config(self):
+        """从磁盘重新加载配置（在设置对话框保存后调用）"""
+        self._config_mgr._config = self._config_mgr._load()
+
+    def _update_interval_label(self):
+        c = self._config_mgr.config
+        self.interval_label.setText(
+            f"间隔 {c.send_interval}s "
+            f"| 每{c.batch_pause_every}个停"
+            f"{c.batch_pause_seconds}s"
+        )
 
     def _on_toggle_theme(self):
         """切换深色/亮色主题"""
@@ -1672,11 +2028,18 @@ class MainWindow(QMainWindow):
         if self._dark_mode:
             self.setStyleSheet(self._THEME)
             self._theme_action.setText("☀ 切换亮色主题")
-            self._append_log("[设置] 已切换为深色主题")
         else:
             self.setStyleSheet(self._THEME_LIGHT)
             self._theme_action.setText("🌙 切换深色主题")
-            self._append_log("[设置] 已切换为亮色主题")
+        self._config_mgr.config.dark_mode = self._dark_mode
+        self._config_mgr.save()
+        self._rebuild_log_view()
+        self._append_log(
+            "[设置] 已切换为深色主题" if self._dark_mode else "[设置] 已切换为亮色主题"
+        )
+        # 同步监听窗口主题
+        if self._listener_panel:
+            self._listener_panel.set_dark_mode(self._dark_mode)
 
     def _on_about(self):
         QMessageBox.about(
@@ -1690,6 +2053,61 @@ class MainWindow(QMainWindow):
     # ================================================================
     # 工具
     # ================================================================
-    def _append_log(self, msg: str):
+    COLOR_MAP_DARK = {
+        "info":    "#e6edf3",
+        "success": "#3fb950",
+        "error":   "#f85149",
+        "warning": "#d29922",
+        "debug":   "#8b949e",
+        "join":    "#58a6ff",
+    }
+
+    COLOR_MAP_LIGHT = {
+        "info":    "#1f2328",
+        "success": "#1a7f37",
+        "error":   "#cf222e",
+        "warning": "#9a6700",
+        "debug":   "#656d76",
+        "join":    "#0550ae",
+    }
+
+    @property
+    def _color_map(self):
+        return self.COLOR_MAP_LIGHT if not self._dark_mode else self.COLOR_MAP_DARK
+
+    def _append_log(self, msg: str, level: str = "info"):
+        # 存储原始条目（用于主题切换时重建颜色）
+        self._log_entries.append((msg, level))
+        if len(self._log_entries) > 1000:
+            self._log_entries = self._log_entries[-600:]
+
         ts = datetime.now().strftime("%H:%M:%S")
-        self.log_view.appendPlainText(f"[{ts}] {msg}")
+        color = self._color_map.get(level, self._color_map["info"])
+        html = f'<span style="color:#8b949e">[{ts}]</span> ' \
+               f'<span style="color:{color}">{msg}</span>'
+        self.log_view.append(html)
+
+        # 自动滚动到底部
+        scrollbar = self.log_view.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+        # 手动限制行数（QTextEdit 没有 setMaximumBlockCount）
+        excess = self.log_view.document().blockCount() - self._log_max_lines - 100
+        if excess > 0:
+            cursor = self.log_view.textCursor()
+            cursor.movePosition(cursor.MoveOperation.Start)
+            cursor.movePosition(
+                cursor.MoveOperation.Down,
+                cursor.MoveMode.KeepAnchor,
+                excess,
+            )
+            cursor.removeSelectedText()
+
+    def _rebuild_log_view(self):
+        """主题切换后重建所有日志条目颜色"""
+        self.log_view.clear()
+        for msg, level in self._log_entries[-600:]:  # 最多保留600条
+            ts = ""  # 重建用简化时间
+            color = self._color_map.get(level, self._color_map["info"])
+            html = f'<span style="color:{color}">{msg}</span>'
+            self.log_view.append(html)

@@ -171,23 +171,24 @@ def _ensure_onebot_servers(config_path: str, http_port: int, ws_port: int):
             srv["host"] = srv.get("host", "127.0.0.1")
             srv["enable"] = True
 
-    # WebSocket 服务器
-    ws_servers = network.get("wsServers")
-    if not isinstance(ws_servers, list) or len(ws_servers) == 0:
-        network["wsServers"] = [{
-            "name": "touhou-promoter-ws",
-            "enable": True,
-            "port": ws_port,
-            "host": "127.0.0.1",
-            "enableHeart": True,
-            "heartInterval": 30000,
-            "accessToken": "",
-        }]
-    else:
-        for srv in ws_servers:
-            srv["port"] = ws_port
-            srv["host"] = srv.get("host", "127.0.0.1")
-            srv["enable"] = True
+    # WebSocket 服务器（NapCat 可能读 websocketServers 或 wsServers，两个都写）
+    for ws_key in ("websocketServers", "wsServers"):
+        ws_servers = network.get(ws_key)
+        if not isinstance(ws_servers, list) or len(ws_servers) == 0:
+            network[ws_key] = [{
+                "name": "touhou-promoter-ws",
+                "enable": True,
+                "port": ws_port,
+                "host": "127.0.0.1",
+                "enableHeart": True,
+                "heartInterval": 30000,
+                "accessToken": "",
+            }]
+        else:
+            for srv in ws_servers:
+                srv["port"] = ws_port
+                srv["host"] = srv.get("host", "127.0.0.1")
+                srv["enable"] = True
 
     network.setdefault("enableLocalFile2Url", True)
     network.setdefault("parseMultMsg", True)

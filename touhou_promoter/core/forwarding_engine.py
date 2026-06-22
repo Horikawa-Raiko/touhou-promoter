@@ -7,12 +7,78 @@
     SendWorker(QThread) → workers.py 中包装
 """
 
+import os
+import re
 import time
 import random
 from typing import Callable, Optional
 
 from touhou_promoter.core.onebot_client import OneBotHTTPClient, OneBotAPIError
 from touhou_promoter.core.onebot_adapter import is_likely_offline_error
+
+# 匹配 CQ 码: [CQ:type,key=value,...]
+_CQ_RE = re.compile(r"\[CQ:(\w+),([^\]]+)\]")
+
+
+def _parse_params(params_str: str) -> dict[str, str]:
+    """解析 CQ 码参数串 key=value,... 为字典"""
+    result = {}
+    for part in params_str.split(","):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            result[k.strip()] = v.strip()
+    return result
+
+
+def parse_message_to_segments(message: str) -> list[dict]:
+    """将包含 CQ 码的文本拆分并转换为 OneBot 消息段数组。
+
+    例如 "你好[CQ:image,file=C:/pic.jpg]世界" →
+    [{"type":"text","data":{"text":"你好"}},
+     {"type":"image","data":{"file":"file:///C:/pic.jpg"}},
+     {"type":"text","data":{"text":"世界"}}]
+    """
+    segments = []
+    pos = 0
+    for m in _CQ_RE.finditer(message):
+        # CQ 码之前的纯文本
+        if m.start() > pos:
+            text = message[pos:m.start()]
+            if text:
+                segments.append({"type": "text", "data": {"text": text}})
+
+        cq_type = m.group(1)
+        params = _parse_params(m.group(2))
+
+        if cq_type == "image":
+            file_path = params.get("file", "")
+            # file:// 协议是 NapCat 识别本地文件的标准方式
+            if file_path and not file_path.startswith("http"):
+                # 确保路径分隔符统一
+                file_path = file_path.replace("\\", "/")
+                if not file_path.startswith("file:///"):
+                    file_path = "file:///" + file_path
+            segments.append({"type": "image", "data": {"file": file_path}})
+        elif cq_type == "at":
+            qq = params.get("qq", "all")
+            segments.append({"type": "at", "data": {"qq": qq}})
+        elif cq_type == "face":
+            fid = params.get("id", "")
+            segments.append({"type": "face", "data": {"id": fid}})
+        elif cq_type == "reply":
+            mid = params.get("id", "")
+            segments.append({"type": "reply", "data": {"id": mid}})
+        else:
+            # 不支持的类型保留原 CQ 码文本
+            segments.append({"type": "text", "data": {"text": m.group(0)}})
+
+        pos = m.end()
+
+    # 尾部剩余文本
+    if pos < len(message):
+        segments.append({"type": "text", "data": {"text": message[pos:]}})
+
+    return segments if segments else [{"type": "text", "data": {"text": message}}]
 
 
 class ForwardingEngine:
@@ -83,6 +149,9 @@ class ForwardingEngine:
         success = 0
         failed = 0
 
+        # 首次发送预热：QQ NT 内核连接冷启动时需要额外重试
+        first_send = True
+
         for i in range(start_index, total):
             if self._stop_flag:
                 if self.on_stopped:
@@ -96,30 +165,51 @@ class ForwardingEngine:
                 self.on_progress(i + 1, total, group_name, "sending")
 
             # 调用 API 发送
-            try:
-                result = self._client.send_group_msg(group_id, message, auto_escape=False)
-                msg_id = str(result.get("message_id", ""))
-                self._sent_message_ids[group_id] = msg_id
-                success += 1
-                if self.on_progress:
-                    self.on_progress(i + 1, total, group_name, "ok")
-            except OneBotAPIError as e:
-                failed += 1
-                reason = f"API错误: {e}"
-                if self.on_progress:
-                    self.on_progress(i + 1, total, group_name, f"fail:{reason}")
-            except Exception as e:
-                failed += 1
-                reason = str(e)
-                # 判断是否掉线
-                if is_likely_offline_error(reason):
+            # 首条消息需要更多重试：QQ NT 内核冷启动时 sendMsg 容易超时
+            retries = 0
+            max_retries = 3 if first_send else 2
+            first_send = False
+            # 纯文本字符串 → 解析 CQ 码后拆分为消息段数组
+            msg = message
+            if isinstance(msg, str):
+                msg = parse_message_to_segments(msg)
+
+            while True:
+                try:
+                    result = self._client.send_group_msg(group_id, msg, auto_escape=False)
+                    msg_id = str(result.get("message_id", ""))
+                    self._sent_message_ids[group_id] = msg_id
+                    success += 1
                     if self.on_progress:
-                        self.on_progress(i + 1, total, group_name, "fail:掉线")
-                    if self.on_stopped:
-                        self.on_stopped(success, total, dict(self._sent_message_ids))
-                    return False
-                if self.on_progress:
-                    self.on_progress(i + 1, total, group_name, f"fail:{reason}")
+                        self.on_progress(i + 1, total, group_name, "ok")
+                    break
+                except OneBotAPIError as e:
+                    reason = str(e)
+                    # NapCat NT kernel 超时 — 重试
+                    if "Timeout" in reason and "NTEvent" in reason and retries < max_retries:
+                        retries += 1
+                        if self.on_progress:
+                            self.on_progress(i + 1, total, group_name,
+                                             f"retry:{retries}/{max_retries}")
+                        time.sleep(1 + retries * 0.5)
+                        continue
+                    failed += 1
+                    if self.on_progress:
+                        self.on_progress(i + 1, total, group_name, f"fail:API错误: {e}")
+                    break
+                except Exception as e:
+                    failed += 1
+                    reason = str(e)
+                    # 判断是否掉线
+                    if is_likely_offline_error(reason):
+                        if self.on_progress:
+                            self.on_progress(i + 1, total, group_name, "fail:掉线")
+                        if self.on_stopped:
+                            self.on_stopped(success, total, dict(self._sent_message_ids))
+                        return False
+                    if self.on_progress:
+                        self.on_progress(i + 1, total, group_name, f"fail:{reason}")
+                    break
 
             # 间隔 + 抖动
             if i < total - 1 and not self._stop_flag:
