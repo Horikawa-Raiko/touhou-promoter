@@ -1,6 +1,7 @@
 """主窗口 — QSplitter左右布局，集成登录/群列表/消息编辑/发送控制/日志"""
 import os
 import platform
+import subprocess
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
@@ -791,22 +792,17 @@ class MainWindow(QMainWindow):
         # 停止监听线程
         self._stop_post_listener()
 
-        # NapCat 停进程树 — 放到后台线程避免卡 UI
+        # NapCat 清理 — 必须在主线程同步执行，daemon 线程退出时会被强杀
         if self._napcat and self._onebot_mode == "managed":
-            import threading
-            napcat = self._napcat
             self._napcat = None
-            def _cleanup():
-                napcat.stop()
-                if os.name == "nt":
-                    try:
-                        subprocess.run(
-                            'taskkill /F /IM QQ.exe',
-                            shell=True, capture_output=True, timeout=5,
-                        )
-                    except Exception:
-                        pass
-            threading.Thread(target=_cleanup, daemon=True).start()
+            for exe in ("QQ.exe", "NapCatWinBootMain.exe"):
+                try:
+                    subprocess.run(
+                        f'taskkill /F /IM {exe}',
+                        shell=True, capture_output=True, timeout=3,
+                    )
+                except Exception:
+                    pass
 
         super().closeEvent(event)
 
