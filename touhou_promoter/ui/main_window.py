@@ -1,5 +1,6 @@
 """主窗口 — QSplitter左右布局，集成登录/群列表/消息编辑/发送控制/日志"""
 import os
+import platform
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
@@ -232,12 +233,12 @@ class MainWindow(QMainWindow):
     }
 
     /* === 危险按钮 === */
-    QPushButton#stopBtn, QPushButton#recallBtn {
+    QPushButton#recallBtn {
         background: #f6f8fa;
         border-color: #e63946;
         color: #e63946;
     }
-    QPushButton#stopBtn:hover, QPushButton#recallBtn:hover {
+    QPushButton#recallBtn:hover {
         background: #ffeef0;
         border-color: #c1121f;
     }
@@ -517,14 +518,14 @@ class MainWindow(QMainWindow):
             stop:0 #f85149, stop:1 #da3633);
     }
 
-    /* === 危险按钮 — 中断/撤回 === */
-    QPushButton#stopBtn, QPushButton#recallBtn {
+    /* === 危险按钮 — 撤回 === */
+    QPushButton#recallBtn {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
             stop:0 #21262d, stop:1 #1a1e25);
         border-color: #f85149;
         color: #f85149;
     }
-    QPushButton#stopBtn:hover, QPushButton#recallBtn:hover {
+    QPushButton#recallBtn:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
             stop:0 #3d1f1f, stop:1 #2d1515);
         border-color: #ff7b72;
@@ -721,16 +722,20 @@ class MainWindow(QMainWindow):
         self._send_worker: SendWorker | None = None
         self._recall_worker: RecallWorker | None = None
         self._last_sent_ids: dict[str, str] = {}  # 上次发送的 message_id 映射
+        self._nt_timeout_groups: list[str] = []   # NT超时的群名，消息已发出但无可撤回的message_id
         self._post_listener: PostSendListener | None = None
         self._listener_panel: ListenerPanel | None = None
         self._image_paths: list[str] = []  # ordered list of image file paths
         self._b64_to_path: dict[str, str] = {}  # base64 data -> file path mapping
         self._dark_mode = self._config_mgr.config.dark_mode
+        self._recalling = False                     # 撤回流程中，抑制 send_interrupted 的 UI 操作
+        # OneBot 模式: "managed" = App管理NapCat进程 / "external" = 用户自启动
+        self._onebot_mode = getattr(self._config_mgr.config, "onebot_mode", "managed")
+        self._onebot_url = getattr(self._config_mgr.config, "onebot_http_url", "http://127.0.0.1:5700")
+        self._external_poll_timer: QTimer | None = None
         self._quick_login_accounts: list = []     # 缓存的快登账号
         self._quick_login_attempting = False    # 是否正在尝试快速登录
-        self._warmup_active = False             # NT 内核预热中
-        self._warmup_remaining = 0
-        self._warmup_timer: QTimer | None = None
+        self._quick_login_mode = False          # 当前启动是否为快登模式（区分扫码/快登的QQ窗口提示）
 
         self._log_entries: list[tuple[str, str, str]] = []  # [(msg, level, timestamp), ...]
 
@@ -745,6 +750,9 @@ class MainWindow(QMainWindow):
         self._connect_ui_signals()
 
         self._append_log("[系统] 东方Project一键宣发姬 已就绪")
+        if self._onebot_mode == "external":
+            self._append_log(f"[系统] 外部OneBot模式，目标: {self._onebot_url}")
+            QTimer.singleShot(500, self._start_external_poll)
 
         # 自动加载上次打开的CSV
         csv_path = self._config_mgr.config.csv_path
@@ -769,34 +777,36 @@ class MainWindow(QMainWindow):
     # 窗口关闭 → 清理
     # ================================================================
     def closeEvent(self, event):
-        """窗口关闭时停止所有后台任务，确保清理 QQ.exe"""
-        # 停止发送/撤回线程
+        """窗口关闭时停止所有后台任务"""
+        # 快速停止发送/撤回线程
         if self._send_worker and self._send_worker.isRunning():
             self._send_worker.stop()
             self._send_worker.quit()
-            self._send_worker.wait(3000)
+            self._send_worker.wait(500)
         if self._recall_worker and self._recall_worker.isRunning():
             self._recall_worker.stop()
             self._recall_worker.quit()
-            self._recall_worker.wait(3000)
+            self._recall_worker.wait(500)
 
         # 停止监听线程
         self._stop_post_listener()
 
-        # NapCat 停进程树（后台）+ 杀 QQ.exe（前台，必须等）
-        if self._napcat:
-            import subprocess
-            self._napcat.stop()
+        # NapCat 停进程树 — 放到后台线程避免卡 UI
+        if self._napcat and self._onebot_mode == "managed":
+            import threading
+            napcat = self._napcat
             self._napcat = None
-            # 兜底：确保 QQ.exe 一定被清掉
-            if os.name == "nt":
-                try:
-                    subprocess.run(
-                        'taskkill /F /IM QQ.exe',
-                        shell=True, capture_output=True, timeout=5,
-                    )
-                except Exception:
-                    pass
+            def _cleanup():
+                napcat.stop()
+                if os.name == "nt":
+                    try:
+                        subprocess.run(
+                            'taskkill /F /IM QQ.exe',
+                            shell=True, capture_output=True, timeout=5,
+                        )
+                    except Exception:
+                        pass
+            threading.Thread(target=_cleanup, daemon=True).start()
 
         super().closeEvent(event)
 
@@ -836,18 +846,21 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(8)
 
         # -- 登录区 --
-        login_group = QGroupBox("🔐 QQ登录")
+        login_group = QGroupBox("QQ登录")
         login_layout = QVBoxLayout(login_group)
         login_layout.setSpacing(8)
 
         self.qr_label = QLabel()
         self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.qr_label.setMinimumSize(160, 160)
+        if self._onebot_mode == "external":
+            self.qr_label.setText("外部 OneBot 模式\n请在 QQ 中自行启动\nOneBot 服务端")
+        else:
+            self.qr_label.setText("请点击下方按钮\n启动NapCat并登录")
         self.qr_label.setStyleSheet(
             "border: 2px dashed #8c959f; border-radius: 12px;"
             "font-size: 14px; background: transparent;"
         )
-        self.qr_label.setText("请点击下方按钮\n启动NapCat并登录")
 
         self.login_status_label = QLabel("状态: 未登录")
         self.login_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -855,7 +868,9 @@ class MainWindow(QMainWindow):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
-        self.login_btn = QPushButton("启动并登录")
+        self.login_btn = QPushButton(
+            "连接外部 OneBot" if self._onebot_mode == "external" else "启动并登录"
+        )
         self.login_btn.setObjectName("loginBtn")
         f = self.login_btn.font(); f.setPointSize(10); self.login_btn.setFont(f)
         self.logout_btn = QPushButton("退出登录")
@@ -950,14 +965,10 @@ class MainWindow(QMainWindow):
         self.send_btn = QPushButton("发送")
         self.send_btn.setObjectName("sendBtn")
         self.send_btn.clicked.connect(self._on_send_clicked)
-        self.stop_btn = QPushButton("中断")
-        self.stop_btn.setObjectName("stopBtn")
-        self.stop_btn.setEnabled(False)
         self.recall_btn = QPushButton("撤回")
         self.recall_btn.setObjectName("recallBtn")
         self.recall_btn.clicked.connect(self._on_recall_clicked)
         me_btn_row.addWidget(self.send_btn)
-        me_btn_row.addWidget(self.stop_btn)
         me_btn_row.addWidget(self.recall_btn)
 
         # 编辑区右下角叠加标签（浮在文本上方）
@@ -1151,11 +1162,18 @@ class MainWindow(QMainWindow):
     def _on_napcat_status(self, status: str):
         self._append_log(f"[NapCat] {status}")
         if "QQ已启动" in status:
-            self.qr_label.setText("请在弹出的\nQQ窗口中\n扫码登录")
-            self.qr_label.setStyleSheet(
-                "border: 2px solid #3fb950; border-radius: 12px;"
-                "font-size: 16px; font-weight: bold; background: transparent;"
-            )
+            if self._quick_login_mode:
+                self.qr_label.setText("快速登录中\n无需扫码")
+                self.qr_label.setStyleSheet(
+                    "border: 2px solid #3fb950; border-radius: 12px;"
+                    "font-size: 16px; font-weight: bold; background: transparent;"
+                )
+            else:
+                self.qr_label.setText("请在弹出的\nQQ窗口中\n扫码登录")
+                self.qr_label.setStyleSheet(
+                    "border: 2px solid #3fb950; border-radius: 12px;"
+                    "font-size: 16px; font-weight: bold; background: transparent;"
+                )
         elif "OneBot 已就绪" in status:
             self.qr_label.setText("✅ OneBot\n已就绪")
             self.qr_label.setStyleSheet(
@@ -1178,7 +1196,7 @@ class MainWindow(QMainWindow):
                 self._set_login_btn_mode("scan")
 
     def _set_login_btn_mode(self, mode: str):
-        """切换登录区域按钮: scan(绿色启动) / quick(蓝色快登) / online(红色退出)"""
+        """切换登录区域按钮: scan(绿色启动) / quick(蓝色快登) / external / online(红色退出)"""
         if mode == "online":
             self.login_btn.hide()
             self.logout_btn.show()
@@ -1191,8 +1209,10 @@ class MainWindow(QMainWindow):
             self.login_btn.style().polish(self.login_btn)
             self.login_btn.show()
             self.logout_btn.hide()
-        else:  # scan
-            self.login_btn.setText("启动并登录")
+        else:  # scan / external
+            self.login_btn.setText(
+                "连接外部 OneBot" if self._onebot_mode == "external" else "启动并登录"
+            )
             self.login_btn.setProperty("mode", "scan")
             self.login_btn.setEnabled(True)
             self.login_btn.style().unpolish(self.login_btn)
@@ -1203,12 +1223,12 @@ class MainWindow(QMainWindow):
     def _on_login_status_changed(self, online: bool, info: str):
         """登录状态变化"""
         if online:
+            self._quick_login_mode = False
             self.login_status_label.setText("状态: 在线")
             self.status_online.setText("在线")
             self.status_qq.setText(f"QQ: {info}")
             self._set_login_btn_mode("online")
             self._append_log(f"[登录] 登录成功! {info}")
-            self._start_nt_warmup()
             self._auto_refresh_intersection()
             self._check_breakpoint_resume()
         else:
@@ -1237,7 +1257,6 @@ class MainWindow(QMainWindow):
     def _connect_ui_signals(self):
         self.login_btn.clicked.connect(self._on_login_clicked)
         self.logout_btn.clicked.connect(self._on_logout_clicked)
-        self.stop_btn.clicked.connect(self._on_stop_clicked)
         self.refresh_groups_btn.clicked.connect(self._auto_refresh_intersection)
         self.select_all_btn.clicked.connect(self._on_select_all)
         self.deselect_all_btn.clicked.connect(self._on_deselect_all)
@@ -1250,11 +1269,16 @@ class MainWindow(QMainWindow):
     # ---- 登录 ----
     def _on_login_clicked(self):
         """登录按钮：
-        - "启动并登录" → 弹窗（可快登可扫码），选账号=快登，选扫码=纯扫码
-        - "快速登录" → NapCat已运行，弹窗（无扫码选项），选账号=杀进程快登
+        - 外部模式 → 直接轮询配置的 OneBot 地址
+        - 管理模式 → NapCat 子进程 + 弹窗选号/扫码
         """
         if self._onebot is not None:
             self._append_log("[登录] 已在线，无需重新登录", "info")
+            return
+
+        # 外部模式：直接开始轮询
+        if self._onebot_mode == "external":
+            self._start_external_poll()
             return
 
         cached = self._config_mgr.config.cached_accounts
@@ -1281,15 +1305,18 @@ class MainWindow(QMainWindow):
                 # 用户选了"扫码登录"
                 self._pending_qq = ""
                 self._quick_login_attempting = False
+                self._quick_login_mode = False
             else:
                 qq = dlg.selected_qq()
                 if not qq:
                     return
                 self._pending_qq = qq
                 self._quick_login_attempting = True
+                self._quick_login_mode = True
         else:
             self._pending_qq = ""
             self._quick_login_attempting = False
+            self._quick_login_mode = False
 
         self.login_btn.setEnabled(False)
         self.login_status_label.setText("状态: 正在准备 NapCat...")
@@ -1346,7 +1373,7 @@ class MainWindow(QMainWindow):
 
             def run(self_):
                 try:
-                    client = OneBotHTTPClient(timeout=5.0)
+                    client = self._make_onebot_client()
                     info = client.get_login_info()
                     uid = str(info.get("user_id", ""))
                     nickname = info.get("nickname", "")
@@ -1368,7 +1395,7 @@ class MainWindow(QMainWindow):
             self._login_poll_active = False
             self._quick_login_attempting = False
             self._clear_quick_login_buttons()
-            self._onebot = OneBotHTTPClient()
+            self._onebot = self._make_onebot_client()
             self._config_mgr.config.last_self_id = uid
             self._config_mgr.config.last_self_nick = nickname
             self._config_mgr.save()
@@ -1383,10 +1410,52 @@ class MainWindow(QMainWindow):
             if self._login_retry_count <= 5 or self._login_retry_count % 10 == 0:
                 self._append_log(f"[登录] 等待中... ({self._login_retry_count}/{self._login_retry_max})")
             interval = 1000 if self._login_retry_count < 10 else 2000
-            QTimer.singleShot(interval, self._start_login_poll)
+            if self._onebot_mode == "external":
+                QTimer.singleShot(interval, self._do_external_poll_check)
+            else:
+                QTimer.singleShot(interval, self._start_login_poll)
         else:
             self._append_log(f"[登录] 超时：{self._login_retry_max}次尝试后仍未连接")
             self.login_btn.setEnabled(True)
+
+    def _make_onebot_client(self) -> OneBotHTTPClient:
+        """根据当前模式创建 OneBot HTTP 客户端"""
+        url = self._onebot_url if self._onebot_mode == "external" else "http://127.0.0.1:5700"
+        return OneBotHTTPClient(base_url=url)
+
+    def _start_external_poll(self):
+        """外部模式：轮询配置的 OneBot 地址直到有响应"""
+        self.login_btn.setEnabled(False)
+        self.login_status_label.setText(f"状态: 正在连接 {self._onebot_url}...")
+        self._append_log(f"[登录] 外部模式，连接 {self._onebot_url} ...")
+        self._login_retry_count = 0
+        self._login_retry_max = 30
+        self._login_poll_active = True
+        self._do_external_poll_check()
+
+    def _do_external_poll_check(self):
+        """执行一次外部轮询检查"""
+        if not getattr(self, "_login_poll_active", True):
+            return
+
+        class ExternalCheckWorker(QThread):
+            login_result = pyqtSignal(bool, str, str)
+            def __init__(self_, url):
+                super().__init__()
+                self_._url = url
+            def run(self_):
+                try:
+                    client = OneBotHTTPClient(base_url=self_._url, timeout=5.0)
+                    info = client.get_login_info()
+                    uid = str(info.get("user_id", ""))
+                    nickname = info.get("nickname", "")
+                    self_.login_result.emit(True, uid, nickname)
+                except Exception as e:
+                    self_.login_result.emit(False, "", str(e))
+
+        self._login_checker = ExternalCheckWorker(self._onebot_url)
+        self._login_checker.login_result.connect(self._on_login_poll_result)
+        self._login_checker.start()
 
     def _merge_cached_accounts(self, new_accounts: list):
         """合并账号到缓存，按QQ号去重，优先保留有昵称的条目"""
@@ -1421,6 +1490,7 @@ class MainWindow(QMainWindow):
     def _do_quick_login_restart(self, qq: str):
         """NapCat 已在运行（扫码模式），杀掉后用指定账号重启快登"""
         self._quick_login_attempting = True
+        self._quick_login_mode = True
         self._login_poll_active = False
         self._clear_quick_login_buttons()
         self.login_status_label.setText(f"状态: 正在切换快速登录 {qq}...")
@@ -1553,6 +1623,7 @@ class MainWindow(QMainWindow):
     def _fallback_to_scan(self, qq: str):
         """快登失败 → 强杀并重启纯扫码模式"""
         self._quick_login_attempting = False
+        self._quick_login_mode = False
         self._login_poll_active = False
         self._clear_quick_login_buttons()
         self._append_log(f"[登录] 切换纯扫码模式...")
@@ -1583,52 +1654,21 @@ class MainWindow(QMainWindow):
         self.login_btn.setEnabled(True)
         self._append_log(f"[错误] {error}")
 
-    # ── NT 内核预热 ──
-
-    _WARMUP_SECONDS = 10
-
-    def _start_nt_warmup(self):
-        """登录后预热 NT 内核，期间禁用发送按钮"""
-        self._warmup_active = True
-        self._warmup_remaining = self._WARMUP_SECONDS
-        self.send_btn.setEnabled(False)
-        self.send_btn.setText(f"预热中… {self._warmup_remaining}s")
-        self._append_log(f"[系统] NT 内核预热中（{self._WARMUP_SECONDS}秒），预热完成后可发送消息")
-        if self._warmup_timer:
-            self._warmup_timer.stop()
-        self._warmup_timer = QTimer(self)
-        self._warmup_timer.timeout.connect(self._on_warmup_tick)
-        self._warmup_timer.start(1000)
-
-    def _on_warmup_tick(self):
-        self._warmup_remaining -= 1
-        if self._warmup_remaining <= 0:
-            self._warmup_active = False
-            if self._warmup_timer:
-                self._warmup_timer.stop()
-                self._warmup_timer = None
-            self.send_btn.setText("发送")
-            self.send_btn.setEnabled(True)
-            self._append_log("[系统] 预热完成，可以发送消息了")
-        else:
-            self.send_btn.setText(f"预热中… {self._warmup_remaining}s")
-
     def _on_logout_clicked(self):
         """退出登录：停一切，回到未登录状态"""
         self._login_poll_active = False
         self._quick_login_attempting = False
+        self._quick_login_mode = False
         self._clear_quick_login_buttons()
-        # 取消预热
-        self._warmup_active = False
-        if self._warmup_timer:
-            self._warmup_timer.stop()
-            self._warmup_timer = None
-        self.send_btn.setText("发送")
+        self._stop_post_listener()
         self._onebot = None
         self._joined_groups.clear()
         self._intersection.clear()
         self.qr_label.clear()
-        self.qr_label.setText("请点击下方按钮\n启动NapCat并登录")
+        if self._onebot_mode == "external":
+            self.qr_label.setText("外部 OneBot 模式\n请在 QQ 中自行启动\nOneBot 服务端")
+        else:
+            self.qr_label.setText("请点击下方按钮\n启动NapCat并登录")
         self.qr_label.setStyleSheet(
             "border: 2px dashed #8c959f; border-radius: 12px;"
             "font-size: 14px; background: transparent;"
@@ -1746,13 +1786,15 @@ class MainWindow(QMainWindow):
             self._append_log("[群列表] 请先通过 文件→加载CSV 加载群列表")
             return
 
+        make_client = self._make_onebot_client
+
         class IntersectionWorker(QThread):
             result_ready = pyqtSignal(set)
             error_msg = pyqtSignal(str)
 
             def run(self):
                 try:
-                    client = OneBotHTTPClient()
+                    client = make_client()
                     groups = client.get_group_list()
                     ids = {str(g.get("group_id", "")) for g in groups}
                     self.result_ready.emit(ids)
@@ -2041,10 +2083,6 @@ class MainWindow(QMainWindow):
     # ---- 发送 ----
     def _on_send_clicked(self):
         """开始群发：收集选中群 → 确认 → 启动 SendWorker"""
-        if self._warmup_active:
-            QMessageBox.information(self, "提示", f"NT 内核预热中，请等待 {self._warmup_remaining} 秒")
-            return
-
         # 检查是否有内容
         html = self.message_edit.toHtml()
         if not self.message_edit.toPlainText().strip() and "<img " not in html:
@@ -2095,40 +2133,53 @@ class MainWindow(QMainWindow):
         )
         self._send_worker.start()
 
-    def _on_stop_clicked(self):
-        """中断发送"""
-        if self._send_worker and self._send_worker.isRunning():
-            reply = QMessageBox.question(
-                self, "确认中断",
-                "确定要中断当前发送吗？\n已发送的消息不会被撤回，未发送的群可以下次继续。",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-            self._send_worker.stop()
-            self._append_log("[发送] 正在中断...")
-            # 中断发送 → 终止监听
-            self._stop_post_listener()
-            
-        elif self._recall_worker and self._recall_worker.isRunning():
-            self._recall_worker.stop()
-            self._append_log("[撤回] 正在中断...")
-
     def _on_recall_clicked(self):
-        """撤回上次发送的消息"""
+        """撤回全部已发送消息，同时终止正在进行的发送任务"""
+        # 如果正在发送，先停止
+        if self._send_worker and self._send_worker.isRunning():
+            self._append_log("[发送] 正在中断...")
+            self._recalling = True
+            self._send_worker.stop()
+            self._send_worker.quit()
+            self._send_worker.wait(1000)
+            # 处理排队的 send_interrupted 信号，让 _on_send_interrupted 在 _recalling 保护下执行
+            QApplication.processEvents()
+            self._recalling = False
+            # 如果 _on_send_interrupted 没拿到 ids，这里兜底
+            if self._send_worker._engine and not self._last_sent_ids:
+                self._last_sent_ids = dict(self._send_worker._engine._sent_message_ids)
+            self._send_worker = None
+            self._stop_post_listener()
+
+        # 如果正在撤回，先停下来
+        if self._recall_worker and self._recall_worker.isRunning():
+            self._recall_worker.stop()
+            self._recall_worker.quit()
+            self._recall_worker.wait(1000)
+            self._recall_worker = None
+
         if not self._last_sent_ids:
             QMessageBox.information(self, "提示", "没有可撤回的消息（上次发送为空或应用已重启）")
+            self._send_btn_enabled(True)
             return
 
         total = len(self._last_sent_ids)
+        nt_warning = ""
+        if self._nt_timeout_groups:
+            nt_warning = (
+                f"\n注意: {len(self._nt_timeout_groups)}个群因NT超时无法撤回"
+                f"（消息已发出但未收到确认）:\n"
+                + "\n".join(f"  • {n}" for n in self._nt_timeout_groups)
+                + "\n"
+            )
         reply = QMessageBox.question(
             self, "确认撤回",
-            f"将撤回上次发送到 {total} 个群的消息。\n\n确定撤回？",
+            f"将撤回已发送到 {total} 个群的消息。\n{nt_warning}\n确定撤回？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
+            self._send_btn_enabled(True)
             return
 
         self._send_btn_enabled(False)
@@ -2165,6 +2216,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setMaximum(total)
         self.progress_bar.setValue(0)
         self._last_sent_ids.clear()
+        self._nt_timeout_groups.clear()
 
     def _on_send_progress(self, current: int, total: int, group_name: str, status: str):
         """发送/撤回进度更新"""
@@ -2175,6 +2227,9 @@ class MainWindow(QMainWindow):
             self._append_log(f"→ {group_name} ...")
         elif status == "ok":
             self._append_log(f"✓ {group_name} — 成功", "success")
+        elif status == "ok(NT超时)":
+            self._append_log(f"✓ {group_name} — 已发出(NT超时无法撤回)", "success")
+            self._nt_timeout_groups.append(group_name)
         elif status.startswith("fail:"):
             reason = status[5:]
             self._append_log(f"✗ {group_name} — {reason}", "error")
@@ -2206,6 +2261,11 @@ class MainWindow(QMainWindow):
                              "success" if failed == 0 else "warning")
             if self._send_worker and hasattr(self._send_worker, "_engine") and self._send_worker._engine:
                 self._last_sent_ids = dict(self._send_worker._engine._sent_message_ids)
+            if self._nt_timeout_groups:
+                self._append_log(
+                    f"[注意] {len(self._nt_timeout_groups)}个群NT超时，消息已发出但无法撤回: "
+                    + ", ".join(self._nt_timeout_groups),
+                    "warning")
             self.status_last_send.setText(
                 f"上次发送: {datetime.now().strftime('%H:%M')} ({success}成功/{failed}失败)"
             )
@@ -2220,6 +2280,14 @@ class MainWindow(QMainWindow):
 
     def _on_send_interrupted(self, sent: int):
         """发送被中断"""
+        if self._recalling:
+            # 由 _on_recall_clicked 接管 UI 状态，这里只记录
+            self._last_sent_ids = dict(self._send_worker._engine._sent_message_ids) \
+                if self._send_worker and hasattr(self._send_worker, "_engine") and self._send_worker._engine \
+                else {}
+            self._send_worker = None
+            return
+
         self._send_btn_enabled(True)
         self.progress_bar.setValue(0)
         self._append_log(f"已中断，已发送 {sent} 条消息（未发送的群可在断点恢复后继续）", "warning")
@@ -2298,7 +2366,7 @@ class MainWindow(QMainWindow):
     def _on_listener_reply(self, group_id: str, text: str):
         """监听面板请求回复 → 调用 API 发送"""
         try:
-            client = OneBotHTTPClient()
+            client = self._make_onebot_client()
             from touhou_promoter.core.forwarding_engine import parse_message_to_segments
             segs = parse_message_to_segments(text)
             client.send_group_msg(group_id, segs, auto_escape=False)
@@ -2309,7 +2377,6 @@ class MainWindow(QMainWindow):
     def _send_btn_enabled(self, enabled: bool):
         """设置发送相关按钮状态"""
         self.send_btn.setEnabled(enabled)
-        self.stop_btn.setEnabled(not enabled)
         self.recall_btn.setEnabled(enabled)
 
     def _on_message_changed(self):
@@ -2506,8 +2573,10 @@ class MainWindow(QMainWindow):
             self, "关于",
             "东方Project一键宣发姬 v1.0\n\n"
             "基于NapCat + OneBot v11的QQ群发工具\n"
-            "开发: 没灵感的鼓 & AI助手\n\n"
+            "开发: 没灵感的鼓 & 没人管的鼓\n\n"
+            "东方幻想指南网站：https://fantasyguide.cn/"
             "东方人人人网站: https://thtripeople.ren/"
+            
         )
 
     # ================================================================
