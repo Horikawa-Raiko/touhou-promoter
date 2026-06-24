@@ -1,8 +1,8 @@
-"""设置对话框 — 发送参数 + LLM配置"""
+"""设置对话框 — 发送参数 + OneBot 连接模式"""
 from PyQt6.QtWidgets import (
-    QDialog, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
-    QFormLayout, QDoubleSpinBox, QSpinBox, QLineEdit, QPushButton,
-    QDialogButtonBox, QGroupBox, QLabel, QFileDialog,
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout,
+    QFormLayout, QDoubleSpinBox, QSpinBox, QLineEdit,
+    QDialogButtonBox, QGroupBox, QComboBox, QLabel,
 )
 from PyQt6.QtCore import Qt
 
@@ -24,25 +24,26 @@ class SettingsDialog(QDialog):
     def _build_ui(self):
         layout = QVBoxLayout(self)
 
-        self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_send_tab(), "📤 发送参数")
-        self._tabs.addTab(self._build_llm_tab(), "🤖 LLM配置")
-        layout.addWidget(self._tabs)
+        # -- OneBot 连接 --
+        conn_group = QGroupBox("OneBot 连接")
+        conn_form = QFormLayout(conn_group)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self._save_and_accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self._onebot_mode = QComboBox()
+        self._onebot_mode.addItem("程序管理 NapCat 进程 (Windows 推荐)", "managed")
+        self._onebot_mode.addItem("连接外部 OneBot 服务 (Mac/Linux 推荐)", "external")
+        self._onebot_mode.currentIndexChanged.connect(self._on_mode_changed)
+        conn_form.addRow("连接模式:", self._onebot_mode)
 
-    # ── 发送参数 ──
+        self._onebot_url = QLineEdit()
+        self._onebot_url.setPlaceholderText("http://127.0.0.1:5700")
+        self._onebot_url.setToolTip("外部 OneBot v11 HTTP API 地址，仅「外部模式」下生效")
+        conn_form.addRow("API 地址:", self._onebot_url)
 
-    def _build_send_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
+        layout.addWidget(conn_group)
 
-        form = QFormLayout()
+        # -- 发送参数 --
+        send_group = QGroupBox("发送参数")
+        form = QFormLayout(send_group)
 
         self._send_interval = QDoubleSpinBox()
         self._send_interval.setRange(0.1, 60.0)
@@ -89,81 +90,30 @@ class SettingsDialog(QDialog):
         self._listener_expiry.setToolTip("发送后继续监听回复的时长，0=禁用")
         form.addRow("发送后监听:", self._listener_expiry)
 
-        layout.addLayout(form)
-        layout.addStretch()
-        return w
+        layout.addWidget(send_group)
 
-    # ── LLM配置 ──
-
-    def _build_llm_tab(self) -> QWidget:
-        w = QWidget()
-        layout = QVBoxLayout(w)
-
-        local_group = QGroupBox("本地模型 (llama-cpp-python)")
-        local_form = QFormLayout(local_group)
-
-        self._local_model_path = QLineEdit()
-        self._local_model_path.setPlaceholderText("留空则使用默认模型路径 (自动下载)")
-        self._local_model_path.setToolTip(
-            "GGUF格式的模型文件路径，推荐 Qwen2.5-0.5B-Instruct Q4_K_M (~400MB)"
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        browse_btn = QPushButton("浏览...")
-        browse_btn.clicked.connect(self._browse_model)
-        path_row = QHBoxLayout()
-        path_row.addWidget(self._local_model_path)
-        path_row.addWidget(browse_btn)
-        local_form.addRow("模型路径:", path_row)
+        buttons.accepted.connect(self._save_and_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
-        self._local_n_ctx = QSpinBox()
-        self._local_n_ctx.setRange(256, 8192)
-        self._local_n_ctx.setValue(2048)
-        self._local_n_ctx.setToolTip("上下文窗口大小（越大越吃内存）")
-        local_form.addRow("上下文长度:", self._local_n_ctx)
-
-        self._local_n_threads = QSpinBox()
-        self._local_n_threads.setRange(1, 32)
-        self._local_n_threads.setValue(4)
-        self._local_n_threads.setToolTip("推理线程数（建议设为CPU核心数的一半）")
-        local_form.addRow("推理线程:", self._local_n_threads)
-
-        layout.addWidget(local_group)
-
-        cloud_group = QGroupBox("云端API (OpenAI兼容)")
-        cloud_form = QFormLayout(cloud_group)
-
-        self._cloud_endpoint = QLineEdit()
-        self._cloud_endpoint.setPlaceholderText(
-            "https://api.openai.com/v1/chat/completions"
-        )
-        self._cloud_endpoint.setToolTip(
-            "OpenAI兼容的API端点，支持 deepseek/通义千问/硅基流动等"
-        )
-        cloud_form.addRow("API端点:", self._cloud_endpoint)
-
-        self._cloud_api_key = QLineEdit()
-        self._cloud_api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self._cloud_api_key.setPlaceholderText("sk-...")
-        cloud_form.addRow("API Key:", self._cloud_api_key)
-
-        self._cloud_model = QLineEdit()
-        self._cloud_model.setPlaceholderText("deepseek-chat / qwen-turbo / gpt-4o-mini")
-        self._cloud_model.setToolTip("模型名称，按各家API文档填写")
-        cloud_form.addRow("模型名:", self._cloud_model)
-
-        self._cloud_max_tokens = QSpinBox()
-        self._cloud_max_tokens.setRange(16, 4096)
-        self._cloud_max_tokens.setValue(256)
-        self._cloud_max_tokens.setToolTip("单次回答的最大token数（加群答案一般很短）")
-        cloud_form.addRow("最大Token:", self._cloud_max_tokens)
-
-        layout.addWidget(cloud_group)
-        layout.addStretch()
-        return w
+    def _on_mode_changed(self):
+        external = self._onebot_mode.currentData() == "external"
+        self._onebot_url.setEnabled(external)
 
     # ── 加载/保存 ──
 
     def _load(self):
         c = self._config_mgr.config
+        mode = getattr(c, "onebot_mode", "managed")
+        idx = self._onebot_mode.findData(mode)
+        if idx >= 0:
+            self._onebot_mode.setCurrentIndex(idx)
+        self._onebot_url.setText(getattr(c, "onebot_http_url", "http://127.0.0.1:5700"))
+        self._onebot_url.setEnabled(mode == "external")
+
         self._send_interval.setValue(c.send_interval)
         self._send_jitter.setValue(c.send_interval_jitter)
         self._batch_every.setValue(c.batch_pause_every)
@@ -171,17 +121,10 @@ class SettingsDialog(QDialog):
         self._recall_interval.setValue(c.recall_interval)
         self._listener_expiry.setValue(c.listener_expiry_seconds)
 
-        self._local_model_path.setText(getattr(c, "local_model_path", ""))
-        self._local_n_ctx.setValue(getattr(c, "local_n_ctx", 2048))
-        self._local_n_threads.setValue(getattr(c, "local_n_threads", 4))
-
-        self._cloud_endpoint.setText(getattr(c, "cloud_endpoint", ""))
-        self._cloud_api_key.setText(getattr(c, "cloud_api_key", ""))
-        self._cloud_model.setText(getattr(c, "cloud_model", ""))
-        self._cloud_max_tokens.setValue(getattr(c, "cloud_max_tokens", 256))
-
     def _save_and_accept(self):
         c = self._config_mgr.config
+        c.onebot_mode = self._onebot_mode.currentData()
+        c.onebot_http_url = self._onebot_url.text().strip() or "http://127.0.0.1:5700"
         c.send_interval = self._send_interval.value()
         c.send_interval_jitter = self._send_jitter.value()
         c.batch_pause_every = self._batch_every.value()
@@ -189,24 +132,5 @@ class SettingsDialog(QDialog):
         c.recall_interval = self._recall_interval.value()
         c.listener_expiry_seconds = self._listener_expiry.value()
 
-        # 扩展配置字段（config_manager 的 AppConfig 会在 _load 时忽略未知字段，
-        # 但我们需要把这些字段加到 AppConfig 里）
-        # 这里用 setattr 兼容，后续需要在 AppConfig 里加字段
-        c.local_model_path = self._local_model_path.text().strip()
-        c.local_n_ctx = self._local_n_ctx.value()
-        c.local_n_threads = self._local_n_threads.value()
-        c.cloud_endpoint = self._cloud_endpoint.text().strip()
-        c.cloud_api_key = self._cloud_api_key.text().strip()
-        c.cloud_model = self._cloud_model.text().strip()
-        c.cloud_max_tokens = self._cloud_max_tokens.value()
-
         self._config_mgr.save()
         self.accept()
-
-    def _browse_model(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择GGUF模型文件", "",
-            "GGUF模型 (*.gguf);;所有文件 (*.*)"
-        )
-        if path:
-            self._local_model_path.setText(path)

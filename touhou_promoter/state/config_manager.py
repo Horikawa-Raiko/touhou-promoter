@@ -21,14 +21,9 @@ class AppConfig:
     cached_accounts: list = field(default_factory=list)  # [(qq, nickname), ...] 缓存的快登账号
     last_token_path: str = ""                # 上次NapCat token路径（复用登录）
     dark_mode: bool = True                   # 深色/浅色主题（默认深色）
-    # LLM配置
-    local_model_path: str = ""               # 本地GGUF模型路径
-    local_n_ctx: int = 2048                  # 本地模型上下文窗口
-    local_n_threads: int = 4                 # 本地模型推理线程数
-    cloud_endpoint: str = ""                 # 云端API端点
-    cloud_api_key: str = ""                  # 云端API密钥
-    cloud_model: str = ""                    # 云端模型名
-    cloud_max_tokens: int = 256              # 云端最大token数
+    # OneBot 连接模式
+    onebot_mode: str = "managed"             # "managed"=App管理NapCat进程 / "external"=用户自启动
+    onebot_http_url: str = "http://127.0.0.1:5700"  # 外部OneBot HTTP地址
 
 
 class ConfigManager:
