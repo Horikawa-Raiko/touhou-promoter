@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTreeWidget, QTreeWidgetItem, QTextEdit, QPushButton,
     QProgressBar, QPlainTextEdit, QStatusBar, QMessageBox, QGroupBox,
-    QFileDialog, QScrollArea, QLineEdit, QMenu, QApplication, QDialog,
+    QFileDialog, QScrollArea, QLineEdit, QMenu, QApplication, QDialog, QFrame,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap
@@ -721,8 +721,11 @@ class MainWindow(QMainWindow):
         self._dark_mode = self._config_mgr.config.dark_mode
         self._quick_login_accounts: list = []     # 缓存的快登账号
         self._quick_login_attempting = False    # 是否正在尝试快速登录
+        self._warmup_active = False             # NT 内核预热中
+        self._warmup_remaining = 0
+        self._warmup_timer: QTimer | None = None
 
-        self._log_entries: list[tuple[str, str]] = []  # [(msg, level), ...]
+        self._log_entries: list[tuple[str, str, str]] = []  # [(msg, level, timestamp), ...]
 
         self.setWindowTitle("东方Project一键宣发姬")
         self.resize(1080, 800)
@@ -873,10 +876,14 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.deselect_all_btn)
         toolbar.addWidget(self.refresh_groups_btn)
         self.group_tree = QTreeWidget()
-        self.group_tree.setHeaderLabels(["分类 / 群名称", "群号"])
-        self.group_tree.setColumnWidth(0, 240)
+        self.group_tree.setHeaderLabels(["分类 / 群名称", ""])
+        self.group_tree.setColumnWidth(0, 300)
+        self.group_tree.header().setStretchLastSection(True)
         self.group_tree.setAlternatingRowColors(True)
         self.group_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.group_tree.setMouseTracking(True)
+        self.group_tree.setToolTip("")
+        self.group_tree.itemEntered.connect(self._on_tree_item_hover)
         self.group_selection_label = QLabel("已选: 0 / 0 群（登录后可刷新交集）")
         self.group_selection_label.setStyleSheet("font-size: 12px; background: transparent;")
         group_layout.addLayout(toolbar)
@@ -924,25 +931,8 @@ class MainWindow(QMainWindow):
         self.insert_image_btn = QPushButton("图片")
         self.insert_image_btn.setToolTip("选择图片文件插入到光标位置")
         self.insert_image_btn.clicked.connect(self._on_insert_image)
-        self.clear_msg_btn = QPushButton("清空")
-        self.clear_msg_btn.clicked.connect(self._clear_message)
         me_btn_row.addWidget(self.insert_image_btn)
-        me_btn_row.addWidget(self.clear_msg_btn)
         me_btn_row.addStretch()
-
-        # 发送参数标签
-        self.interval_label = QLabel(
-            f"间隔 {self._config_mgr.config.send_interval}s "
-            f"| 每{self._config_mgr.config.batch_pause_every}个停"
-            f"{self._config_mgr.config.batch_pause_seconds}s"
-        )
-        self.interval_label.setStyleSheet("font-size: 11px; background: transparent;")
-        me_btn_row.addWidget(self.interval_label)
-
-        self.target_label = QLabel("目标: 0")
-        self.target_label.setStyleSheet("font-weight: bold; font-size: 12px; background: transparent;")
-        me_btn_row.addWidget(self.target_label)
-
         self.send_btn = QPushButton("发送")
         self.send_btn.setObjectName("sendBtn")
         self.send_btn.clicked.connect(self._on_send_clicked)
@@ -955,6 +945,31 @@ class MainWindow(QMainWindow):
         me_btn_row.addWidget(self.send_btn)
         me_btn_row.addWidget(self.stop_btn)
         me_btn_row.addWidget(self.recall_btn)
+
+        # 编辑区右下角叠加标签（浮在文本上方）
+        self._editor_overlay = QFrame(self.message_edit.viewport())
+        self._editor_overlay.setObjectName("editorOverlay")
+        full_info = (
+            f"发送间隔 {self._config_mgr.config.send_interval}s，"
+            f"每{self._config_mgr.config.batch_pause_every}条暂停"
+            f"{self._config_mgr.config.batch_pause_seconds}s"
+        )
+        short_info = (
+            f"间隔{self._config_mgr.config.send_interval}s/"
+            f"每{self._config_mgr.config.batch_pause_every}停{self._config_mgr.config.batch_pause_seconds}s"
+        )
+        self.interval_label = QLabel(short_info)
+        self.interval_label.setToolTip(full_info)
+        self.interval_label.setStyleSheet("font-size: 10px; color: #8b949e; background: transparent;")
+        self.target_label = QLabel("目标群: 0")
+        self.target_label.setStyleSheet("font-weight: bold; font-size: 11px; color: #e6edf3; background: transparent;")
+        ol = QHBoxLayout(self._editor_overlay)
+        ol.setContentsMargins(8, 2, 8, 3)
+        ol.setSpacing(10)
+        ol.addStretch()
+        ol.addWidget(self.interval_label)
+        ol.addWidget(self.target_label)
+        self._position_editor_overlay()
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
@@ -973,7 +988,8 @@ class MainWindow(QMainWindow):
 
         # ── 监听面板 ──
         self._listener_panel = ListenerPanel(dark_mode=self._dark_mode,
-                                             self_nick=self._config_mgr.config.last_self_nick)
+                                             self_nick=self._config_mgr.config.last_self_nick,
+                                             self_id=self._config_mgr.config.last_self_id)
         self._listener_panel.reply_requested.connect(self._on_listener_reply)
         right_layout.addWidget(self._listener_panel, 1)
 
@@ -1010,6 +1026,7 @@ class MainWindow(QMainWindow):
             mw = int(total * 0.32)
             rw = total - lw - mw
             self._main_splitter.setSizes([lw, mw, rw])
+            self._refresh_overlay_theme()
 
     def _build_statusbar(self):
         self.status_bar = QStatusBar()
@@ -1100,6 +1117,7 @@ class MainWindow(QMainWindow):
         r"\[Notice\]",               # 系统通知
         r"发送\s*->",               # Bot 自身发送消息日志
         r"里面贴的|链接.*失效|视频.*没了|贴子.*删除|主题.*已删",  # 贴吧/链接预览内容
+        r"发生错误.*NTEvent",        # NapCat NT超时（消息已发出，仅确认丢失）
     ]
 
     def _on_napcat_log_line(self, line: str):
@@ -1176,6 +1194,7 @@ class MainWindow(QMainWindow):
             self.status_qq.setText(f"QQ: {info}")
             self._set_login_btn_mode("online")
             self._append_log(f"[登录] 登录成功! {info}")
+            self._start_nt_warmup()
             self._auto_refresh_intersection()
             self._check_breakpoint_resume()
         else:
@@ -1337,6 +1356,8 @@ class MainWindow(QMainWindow):
             self._clear_quick_login_buttons()
             self._config_mgr.config.last_self_id = uid
             self._config_mgr.config.last_self_nick = nickname
+            self._config_mgr.save()
+            self._listener_panel.set_bot_info(uid, nickname)
             self._merge_cached_accounts([(uid, nickname)])
             label = f"{nickname} ({uid})" if nickname else uid
             self._state.login_status_changed.emit(True, label)
@@ -1547,11 +1568,47 @@ class MainWindow(QMainWindow):
         self.login_btn.setEnabled(True)
         self._append_log(f"[错误] {error}")
 
+    # ── NT 内核预热 ──
+
+    _WARMUP_SECONDS = 10
+
+    def _start_nt_warmup(self):
+        """登录后预热 NT 内核，期间禁用发送按钮"""
+        self._warmup_active = True
+        self._warmup_remaining = self._WARMUP_SECONDS
+        self.send_btn.setEnabled(False)
+        self.send_btn.setText(f"预热中… {self._warmup_remaining}s")
+        self._append_log(f"[系统] NT 内核预热中（{self._WARMUP_SECONDS}秒），预热完成后可发送消息")
+        if self._warmup_timer:
+            self._warmup_timer.stop()
+        self._warmup_timer = QTimer(self)
+        self._warmup_timer.timeout.connect(self._on_warmup_tick)
+        self._warmup_timer.start(1000)
+
+    def _on_warmup_tick(self):
+        self._warmup_remaining -= 1
+        if self._warmup_remaining <= 0:
+            self._warmup_active = False
+            if self._warmup_timer:
+                self._warmup_timer.stop()
+                self._warmup_timer = None
+            self.send_btn.setText("发送")
+            self.send_btn.setEnabled(True)
+            self._append_log("[系统] 预热完成，可以发送消息了")
+        else:
+            self.send_btn.setText(f"预热中… {self._warmup_remaining}s")
+
     def _on_logout_clicked(self):
         """退出登录：停一切，回到未登录状态"""
         self._login_poll_active = False
         self._quick_login_attempting = False
         self._clear_quick_login_buttons()
+        # 取消预热
+        self._warmup_active = False
+        if self._warmup_timer:
+            self._warmup_timer.stop()
+            self._warmup_timer = None
+        self.send_btn.setText("发送")
         self._onebot = None
         self._joined_groups.clear()
         self._intersection.clear()
@@ -1725,7 +1782,7 @@ class MainWindow(QMainWindow):
             | Qt.ItemFlag.ItemIsSelectable
             | Qt.ItemFlag.ItemIsUserCheckable
         )
-        PARENT_FLAGS = LEAF_FLAGS | Qt.ItemFlag.ItemIsAutoTristate
+        PARENT_FLAGS = LEAF_FLAGS
 
         self._updating_checkboxes = True
         for root in roots:
@@ -1763,6 +1820,11 @@ class MainWindow(QMainWindow):
         self._updating_checkboxes = True
         state = item.checkState(0)
 
+        # 父节点被点成 PartiallyChecked 时强制转 Checked，只允许全选/全不选
+        if item.childCount() > 0 and state == Qt.CheckState.PartiallyChecked:
+            state = Qt.CheckState.Checked
+            item.setCheckState(0, state)
+
         # 向下传播到所有子节点
         self._propagate_check_state(item, state)
 
@@ -1796,39 +1858,57 @@ class MainWindow(QMainWindow):
         self._pre_click_item = None
         self._pre_click_state = None
 
+    def _on_tree_item_hover(self, item: QTreeWidgetItem, column: int):
+        """鼠标悬浮时显示群号和提示"""
+        gid = item.data(0, Qt.ItemDataRole.UserRole) or ""
+        if gid and item.childCount() == 0:
+            self.group_tree.setToolTip(f"群号: {gid}  (Ctrl+C 复制)")
+            self._hovered_gid = gid
+        else:
+            self.group_tree.setToolTip("")
+            self._hovered_gid = ""
+
+    def keyPressEvent(self, event):
+        """Ctrl+C 复制当前悬浮的群号"""
+        if event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            gid = getattr(self, "_hovered_gid", "")
+            if gid:
+                QApplication.clipboard().setText(gid)
+                self._append_log(f"已复制群号: {gid}")
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
     def _on_tree_context_menu(self, pos):
         """右键菜单"""
         item = self.group_tree.itemAt(pos)
-        if not item or not item.data(0, Qt.ItemDataRole.UserRole):
+        gid = item.data(0, Qt.ItemDataRole.UserRole) if item else ""
+        if not gid:
             return
-        record = item.data(0, Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
-        copy_action = menu.addAction(f"📋 复制群号: {record.group_id}")
+        copy_action = menu.addAction(f"📋 复制群号: {gid}")
         info_action = menu.addAction(f"ℹ️ 查看详情")
         menu.addSeparator()
         exclude_action = menu.addAction("🚫 排除此群")
 
         action = menu.exec(self.group_tree.mapToGlobal(pos))
         if action == copy_action:
-            QApplication.clipboard().setText(record.group_id)
-            self._append_log(f"已复制群号: {record.group_id}")
+            QApplication.clipboard().setText(gid)
+            self._append_log(f"已复制群号: {gid}")
         elif action == info_action:
+            gid_str = str(gid) if gid else "-"
+            name = item.text(0) or "-"
             QMessageBox.information(
                 self, "群详情",
-                f"群名称: {record.group_name or '-'}\n"
-                f"群号: {record.group_id}\n"
-                f"大类: {record.category}\n"
-                f"小类: {record.subcategory or record.region or record.school or '-'}\n"
-                f"地点: {record.location or '-'}\n"
-                f"活动: {record.event_name or '-'}\n"
-                f"说明: {record.note or '-'}"
+                f"群号: {gid_str}\n"
+                f"群名称: {name}"
             )
         elif action == exclude_action:
             item.setCheckState(0, Qt.CheckState.Unchecked)
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             self._update_parent_check_state(item.parent() or self.group_tree.invisibleRootItem())
             self._update_selection_count()
-            self._append_log(f"已排除群: {record.display_label()}", "warning")
+            self._append_log(f"已排除群: {item.text(0)} ({gid})", "warning")
 
     def _on_group_search(self, text: str):
         """搜索过滤群列表"""
@@ -1858,12 +1938,16 @@ class MainWindow(QMainWindow):
             cat_item.setHidden(not cat_visible)
 
     def _propagate_check_state(self, parent: QTreeWidgetItem, state):
-        """递归设置所有子节点的勾选状态"""
+        """递归设置所有后代叶子节点的勾选状态，父节点只做 Checked/Unchecked"""
+        if state == Qt.CheckState.PartiallyChecked:
+            state = Qt.CheckState.Checked
         for i in range(parent.childCount()):
             child = parent.child(i)
-            child.setCheckState(0, state)
-            if child.childCount() > 0:
+            if child.childCount() == 0:
+                child.setCheckState(0, state)
+            else:
                 self._propagate_check_state(child, state)
+                self._update_parent_check_state(child)
 
     def _update_parent_check_state(self, parent: QTreeWidgetItem):
         """根据子节点更新父节点的三态勾选"""
@@ -1884,28 +1968,31 @@ class MainWindow(QMainWindow):
             parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
 
     def _update_selection_count(self):
-        """统计已选中的叶子群数量"""
+        """统计已选中的叶子群数量（仅限交集内）"""
         count = self._count_checked_leaves(self.group_tree.invisibleRootItem())
         total = len(self._intersection)
+        # 防止因树中有残留节点导致 count > total
+        count = min(count, total)
         self._state.selection_changed.emit(count)
         self.group_selection_label.setText(f"已选: {count} / {total} 群")
         self.target_label.setText(f"目标群: {count}")
 
     def _count_checked_leaves(self, parent: QTreeWidgetItem) -> int:
-        """递归统计已勾选的叶子节点数"""
+        """递归统计已勾选的叶子节点数（只计入在 _intersection 中的群）"""
         total = 0
         for i in range(parent.childCount()):
             child = parent.child(i)
             if child.childCount() == 0:
-                # 叶子节点
-                if child.checkState(0) == Qt.CheckState.Checked:
+                gid = child.data(0, Qt.ItemDataRole.UserRole) or ""
+                if (child.checkState(0) == Qt.CheckState.Checked
+                        and gid in self._intersection):
                     total += 1
             else:
                 total += self._count_checked_leaves(child)
         return total
 
     def _on_select_all(self):
-        """全选所有群"""
+        """全选所有交集群"""
         if not self._intersection:
             return
         self._updating_checkboxes = True
@@ -1923,16 +2010,24 @@ class MainWindow(QMainWindow):
         self._update_selection_count()
 
     def _set_all_check_state(self, parent: QTreeWidgetItem, state):
-        """递归设置所有节点（含父节点）的勾选状态"""
+        """递归设置所有叶子节点（父节点不直接勾选，只勾选交集内的叶子）"""
         for i in range(parent.childCount()):
             child = parent.child(i)
-            child.setCheckState(0, state)
-            if child.childCount() > 0:
+            if child.childCount() == 0:
+                gid = child.data(0, Qt.ItemDataRole.UserRole) or ""
+                if gid in self._intersection:
+                    child.setCheckState(0, state)
+            else:
                 self._set_all_check_state(child, state)
+                self._update_parent_check_state(child)
 
     # ---- 发送 ----
     def _on_send_clicked(self):
         """开始群发：收集选中群 → 确认 → 启动 SendWorker"""
+        if self._warmup_active:
+            QMessageBox.information(self, "提示", f"NT 内核预热中，请等待 {self._warmup_remaining} 秒")
+            return
+
         # 检查是否有内容
         html = self.message_edit.toHtml()
         if not self.message_edit.toPlainText().strip() and "<img " not in html:
@@ -2324,6 +2419,36 @@ class MainWindow(QMainWindow):
             self._append_log("[设置] 发送参数已更新")
             self._update_interval_label()
 
+    def _position_editor_overlay(self):
+        """将叠加标签定位到编辑区右下角"""
+        if not hasattr(self, '_editor_overlay') or not self._editor_overlay:
+            return
+        vp = self.message_edit.viewport()
+        w, h = vp.width(), vp.height()
+        self._editor_overlay.setGeometry(w - 190, h - 26, 182, 24)
+        self._editor_overlay.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._position_editor_overlay)
+
+    def _refresh_overlay_theme(self):
+        """主题切换时更新叠加标签背景色"""
+        if not hasattr(self, '_editor_overlay') or not self._editor_overlay:
+            return
+        bg = "rgba(22, 27, 34, 0.85)" if self._dark_mode else "rgba(246, 248, 250, 0.85)"
+        text_c = "#8b949e" if self._dark_mode else "#656d76"
+        bold_c = "#e6edf3" if self._dark_mode else "#1f2328"
+        self._editor_overlay.setStyleSheet(
+            f"QFrame#editorOverlay {{ background: {bg}; border-radius: 4px; }}"
+        )
+        self.interval_label.setStyleSheet(
+            f"font-size: 10px; color: {text_c}; background: transparent;"
+        )
+        self.target_label.setStyleSheet(
+            f"font-weight: bold; font-size: 11px; color: {bold_c}; background: transparent;"
+        )
+
     def _refresh_config(self):
         """从磁盘重新加载配置（在设置对话框保存后调用）"""
         self._config_mgr._config = self._config_mgr._load()
@@ -2331,9 +2456,12 @@ class MainWindow(QMainWindow):
     def _update_interval_label(self):
         c = self._config_mgr.config
         self.interval_label.setText(
-            f"间隔 {c.send_interval}s "
-            f"| 每{c.batch_pause_every}个停"
-            f"{c.batch_pause_seconds}s"
+            f"间隔{c.send_interval}s/"
+            f"每{c.batch_pause_every}停{c.batch_pause_seconds}s"
+        )
+        self.interval_label.setToolTip(
+            f"发送间隔 {c.send_interval}s，"
+            f"每{c.batch_pause_every}条暂停{c.batch_pause_seconds}s"
         )
 
     def _on_toggle_theme(self):
@@ -2348,6 +2476,7 @@ class MainWindow(QMainWindow):
         self._config_mgr.config.dark_mode = self._dark_mode
         self._config_mgr.save()
         self._rebuild_log_view()
+        self._refresh_overlay_theme()
         self._append_log(
             "[设置] 已切换为深色主题" if self._dark_mode else "[设置] 已切换为亮色主题"
         )
@@ -2390,12 +2519,11 @@ class MainWindow(QMainWindow):
         return self.COLOR_MAP_LIGHT if not self._dark_mode else self.COLOR_MAP_DARK
 
     def _append_log(self, msg: str, level: str = "info"):
-        # 存储原始条目（用于主题切换时重建颜色）
-        self._log_entries.append((msg, level))
+        ts = datetime.now().strftime("%H:%M:%S")
+        self._log_entries.append((msg, level, ts))
         if len(self._log_entries) > 1000:
             self._log_entries = self._log_entries[-600:]
 
-        ts = datetime.now().strftime("%H:%M:%S")
         color = self._color_map.get(level, self._color_map["info"])
         html = f'<span style="color:#8b949e">[{ts}]</span> ' \
                f'<span style="color:{color}">{msg}</span>'
@@ -2418,10 +2546,10 @@ class MainWindow(QMainWindow):
             cursor.removeSelectedText()
 
     def _rebuild_log_view(self):
-        """主题切换后重建所有日志条目颜色"""
+        """主题切换后重建所有日志条目颜色（保留时间戳）"""
         self.log_view.clear()
-        for msg, level in self._log_entries[-600:]:  # 最多保留600条
-            ts = ""  # 重建用简化时间
+        for msg, level, ts in self._log_entries[-600:]:
             color = self._color_map.get(level, self._color_map["info"])
-            html = f'<span style="color:{color}">{msg}</span>'
+            html = f'<span style="color:#8b949e">[{ts}]</span> ' \
+                   f'<span style="color:{color}">{msg}</span>'
             self.log_view.append(html)

@@ -38,7 +38,7 @@ def _escape_html(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _render_cq_as_html(raw_message: str, self_nick: str = "") -> str:
+def _render_cq_as_html(raw_message: str, self_nick: str = "", self_id: str = "") -> str:
     """将 CQ 码消息渲染为 QQ 风格的 HTML"""
 
     def replace_cq(m: re.Match) -> str:
@@ -55,8 +55,8 @@ def _render_cq_as_html(raw_message: str, self_nick: str = "") -> str:
             qq = params.get("qq", "")
             if qq == "all":
                 label = "全体成员"
-            elif self_nick and qq != "all":
-                label = self_nick
+            elif self_id and qq == self_id:
+                label = self_nick or qq
             else:
                 label = qq
             return f'<span style="color:#58a6ff;font-weight:bold">@{label}</span>'
@@ -113,10 +113,11 @@ class ListenerPanel(QWidget):
     reply_requested = pyqtSignal(str, str)
     """请求回复 (group_id, text) — 由 main_window 处理发送"""
 
-    def __init__(self, parent=None, dark_mode: bool = True, self_nick: str = ""):
+    def __init__(self, parent=None, dark_mode: bool = True, self_nick: str = "", self_id: str = ""):
         super().__init__(parent)
         self._dark = dark_mode
         self._self_nick = self_nick
+        self._self_id = self_id
         self._messages: list[ListenMessage] = []
         self._selected_gid: str = ""
         self._msg_widgets: dict[int, QWidget] = {}
@@ -247,6 +248,7 @@ class ListenerPanel(QWidget):
         self._reply_input = QLineEdit()
         self._reply_input.setPlaceholderText("输入回复...")
         self._reply_input.returnPressed.connect(self._on_send_reply)
+        self._reply_input.textChanged.connect(self._on_reply_input_changed)
         rl.addWidget(self._reply_input, 1)
 
         self._reply_send_btn = QPushButton("发送")
@@ -257,7 +259,24 @@ class ListenerPanel(QWidget):
 
         layout.addWidget(reply_widget)
 
+        # ===== 悬浮大文本框（只读预览长文本） =====
+        self._fulltext_preview = QLabel()
+        self._fulltext_preview.setWordWrap(True)
+        self._fulltext_preview.setTextFormat(Qt.TextFormat.PlainText)
+        self._fulltext_preview.setVisible(False)
+        self._fulltext_preview.setMaximumHeight(120)
+        self._fulltext_preview.setObjectName("lp_fulltext_preview")
+        layout.addWidget(self._fulltext_preview)
+
     # ── 公开 API ──
+
+    def set_bot_info(self, self_id: str, self_nick: str):
+        """更新 bot 自己的 QQ 号和昵称（登录成功后调用）"""
+        changed = self._self_id != self_id or self._self_nick != self_nick
+        self._self_id = self_id
+        self._self_nick = self_nick
+        if changed and self._messages:
+            self._rebuild_all_bubbles()
 
     def add_message(self, group_id: str, group_name: str, sender_nick: str,
                     raw_message: str, timestamp: float | None = None,
@@ -314,6 +333,22 @@ class ListenerPanel(QWidget):
             self._scroll.verticalScrollBar().maximum()
         ))
 
+    def _rebuild_all_bubbles(self):
+        """重建所有气泡（bot 信息变更时调用）"""
+        self._msg_widgets.clear()
+        while self._msg_layout.count() > 1:
+            item = self._msg_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for i, msg in enumerate(self._messages):
+            if msg.sender_nick == "我":
+                bubble = self._build_own_bubble(msg)
+            else:
+                bubble = self._build_bubble(msg, i)
+            self._msg_layout.insertWidget(self._msg_layout.count() - 1, bubble)
+        if self._selected_idx >= 0 and self._selected_idx in self._msg_widgets:
+            self._highlight_bubble(self._selected_idx)
+
     def set_dark_mode(self, dark: bool):
         self._dark = dark
         self._apply_theme()
@@ -343,7 +378,7 @@ class ListenerPanel(QWidget):
         meta_color = "#8b949e" if self._dark else "#656d76"
         avatar_bg = "#4a90d9" if self._dark else "#58a6ff"
 
-        html = _render_cq_as_html(msg.raw_message, self._self_nick)
+        html = _render_cq_as_html(msg.raw_message, self._self_nick, self._self_id)
         name = msg.group_name or msg.group_id
 
         avatar_char = _escape_html(msg.sender_nick[0]) if msg.sender_nick else "群"
@@ -391,7 +426,8 @@ class ListenerPanel(QWidget):
         bubble.setWordWrap(True)
         bubble.setTextFormat(Qt.TextFormat.RichText)
         bubble.setStyleSheet(
-            f"background:{bubble_bg};border-radius:10px;padding:8px 12px"
+            f"background:{bubble_bg};border:2px solid transparent;"
+            f"border-radius:10px;padding:6px 10px"
         )
         cl.addWidget(bubble)
 
@@ -459,7 +495,8 @@ class ListenerPanel(QWidget):
         bubble.setWordWrap(True)
         bubble.setTextFormat(Qt.TextFormat.RichText)
         bubble.setStyleSheet(
-            f"background:{bubble_bg};border-radius:10px;padding:8px 12px"
+            f"background:{bubble_bg};border:2px solid transparent;"
+            f"border-radius:10px;padding:6px 10px"
         )
         cl.addWidget(bubble)
 
@@ -533,12 +570,13 @@ class ListenerPanel(QWidget):
         return re.sub(r"\[CQ:[^\]]+\]", "", raw).strip()
 
     def _set_reply_target(self, msg: ListenMessage):
-        """设置回复目标 + 显示引用条 + 切换群聊"""
+        """设置回复目标 + 显示引用条和 @ 条 + 切换群聊"""
         self._reply_target_msg = msg
-        self._at_target_msg = None       # 一次只能一种
-        self._at_bar.setVisible(False)
+        # 回复时自动 @ 同一个人
+        if self._at_target_msg is not msg:
+            self._set_at_bar(msg)
 
-        # 引用条 — 去掉 CQ 码，截断到 30 字
+        # 引用条
         plain = self._strip_cq(msg.raw_message)
         summary = _escape_html(plain[:30])
         if len(plain) > 30:
@@ -547,10 +585,14 @@ class ListenerPanel(QWidget):
         self._quote_label.setText(f"回复 {sender}: {summary}")
         self._quote_bar.setVisible(True)
 
+    def _set_at_target(self, msg: ListenMessage):
+        """设置 @ 目标 + 显示 @ 标签 + 切换群聊（独立于回复引用）"""
+        self._at_target_msg = msg
+        self._set_at_bar(msg)
+
         # 自动选群 + 高亮
         self._selected_gid = msg.group_id
         self._switch_group_dropdown(msg.group_id)
-        # 找到对应气泡高亮
         for i, m in enumerate(self._messages):
             if m is msg:
                 self._highlight_bubble(i)
@@ -558,13 +600,8 @@ class ListenerPanel(QWidget):
                 break
         self._reply_send_btn.setEnabled(True)
 
-    def _set_at_target(self, msg: ListenMessage):
-        """设置 @ 目标 + 显示 @ 标签 + 切换群聊"""
-        self._at_target_msg = msg
-        self._reply_target_msg = None    # 一次只能一种
-        self._quote_bar.setVisible(False)
-
-        # @ 标签
+    def _set_at_bar(self, msg: ListenMessage):
+        """显示 @ 标签条"""
         nick = _escape_html(msg.sender_nick)
         self._at_label.setText(f"@{nick}")
         self._at_bar.setVisible(True)
@@ -580,14 +617,24 @@ class ListenerPanel(QWidget):
         self._reply_send_btn.setEnabled(True)
 
     def _cancel_reply_target(self):
-        """取消回复目标"""
+        """取消回复目标（同时取消 @）"""
         self._reply_target_msg = None
+        self._at_target_msg = None
         self._quote_bar.setVisible(False)
+        self._at_bar.setVisible(False)
 
     def _cancel_at_target(self):
-        """取消 @ 目标"""
+        """只取消 @，保留引用"""
         self._at_target_msg = None
         self._at_bar.setVisible(False)
+
+    def _on_reply_input_changed(self, text: str):
+        """输入框文本变化时显示/隐藏悬浮预览"""
+        if len(text) > 60:
+            self._fulltext_preview.setText(text)
+            self._fulltext_preview.setVisible(True)
+        else:
+            self._fulltext_preview.setVisible(False)
 
     def _switch_group_dropdown(self, gid: str):
         """切换群聊下拉框到指定群"""
@@ -597,17 +644,24 @@ class ListenerPanel(QWidget):
                 return
 
     def _highlight_bubble(self, idx: int):
-        """给指定索引的气泡加高亮（仅改背景色，不加边框）"""
-        highlight_bg = "#245b8c" if self._dark else "#a8d4ff"
-        normal_bg = "#1a3a5c" if self._dark else "#c6e2ff"
+        """给指定索引的气泡加蓝色边框高亮"""
+        highlight_bg = "#1a4a7a" if self._dark else "#c6e2ff"
+        highlight_border = "#58a6ff"
+        normal_bg = "#1e4a6e" if self._dark else "#c6e2ff"
         for i, w in self._msg_widgets.items():
             bubble_label = getattr(w, '_bubble_label', None)
             if not bubble_label:
                 continue
-            bg = highlight_bg if i == idx else normal_bg
-            bubble_label.setStyleSheet(
-                f"background:{bg};border-radius:10px;padding:8px 12px"
-            )
+            if i == idx:
+                bubble_label.setStyleSheet(
+                    f"background:{highlight_bg};border:2px solid {highlight_border};"
+                    f"border-radius:10px;padding:6px 10px"
+                )
+            else:
+                bubble_label.setStyleSheet(
+                    f"background:{normal_bg};border:2px solid transparent;"
+                    f"border-radius:10px;padding:6px 10px"
+                )
 
     def _on_reply_target_changed(self, idx: int):
         """下拉框选择改变"""
@@ -682,8 +736,8 @@ class ListenerPanel(QWidget):
         border = "#30363d" if self._dark else "#d0d7de"
         text_color = "#e6edf3" if self._dark else "#1f2328"
         meta_color = "#8b949e" if self._dark else "#656d76"
-        quote_bg = "#1c2d3d" if self._dark else "#e3f2fd"
-        at_bg = "#2d1c3a" if self._dark else "#fce4ec"
+        quote_bg = "rgba(88, 166, 255, 0.12)" if self._dark else "rgba(88, 166, 255, 0.15)"
+        at_bg = "rgba(249, 117, 131, 0.12)" if self._dark else "rgba(249, 117, 131, 0.15)"
         cancel_hover = "#3a3a3a" if self._dark else "#d0d0d0"
         cancel_color = "#999999" if self._dark else "#666666"
         cancel_hover_color = "#ffffff" if self._dark else "#000000"
@@ -780,5 +834,13 @@ class ListenerPanel(QWidget):
             }}
             QPushButton:hover {{
                 background: {"#21262d" if self._dark else "#e1e4e8"};
+            }}
+            QLabel#lp_fulltext_preview {{
+                background: {bg};
+                color: {text_color};
+                border: 1px solid {border};
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
             }}
         """)
