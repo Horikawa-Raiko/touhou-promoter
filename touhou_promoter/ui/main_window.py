@@ -24,19 +24,6 @@ from touhou_promoter.core.post_send_listener import PostSendListener
 from touhou_promoter.ui.listener_panel import ListenerPanel
 
 
-class NapCatStopWorker(QThread):
-    """在后台线程停止 NapCat，不阻塞 GUI 关闭"""
-    def __init__(self, napcat, parent=None):
-        super().__init__(parent)
-        self._napcat = napcat
-
-    def run(self):
-        try:
-            self._napcat.stop()
-        except Exception:
-            pass
-        self.stopped.emit()
-
 class NapCatSetupWorker(QThread):
     """在子线程中搜索/下载 NapCat，避免阻塞 GUI"""
     status = pyqtSignal(str)
@@ -762,7 +749,7 @@ class MainWindow(QMainWindow):
     # 窗口关闭 → 清理
     # ================================================================
     def closeEvent(self, event):
-        """窗口关闭时停止所有后台任务，NapCat 放入后台线程清理避免阻塞"""
+        """窗口关闭时停止所有后台任务，确保清理 QQ.exe"""
         # 停止发送/撤回线程
         if self._send_worker and self._send_worker.isRunning():
             self._send_worker.stop()
@@ -776,11 +763,20 @@ class MainWindow(QMainWindow):
         # 停止监听线程
         self._stop_post_listener()
 
-        # NapCat 停止放入后台线程，窗口立即关闭不卡顿
+        # NapCat 停进程树（后台）+ 杀 QQ.exe（前台，必须等）
         if self._napcat:
-            self._napcat_stop_worker = NapCatStopWorker(self._napcat)
-            self._napcat_stop_worker.start()
+            import subprocess
+            self._napcat.stop()
             self._napcat = None
+            # 兜底：确保 QQ.exe 一定被清掉
+            if os.name == "nt":
+                try:
+                    subprocess.run(
+                        'taskkill /F /IM QQ.exe',
+                        shell=True, capture_output=True, timeout=5,
+                    )
+                except Exception:
+                    pass
 
         super().closeEvent(event)
 
