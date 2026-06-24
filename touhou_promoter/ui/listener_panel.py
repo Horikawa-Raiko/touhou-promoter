@@ -18,7 +18,7 @@ import base64
 from datetime import datetime
 from typing import Optional, Callable
 
-from PyQt6.QtCore import Qt, QTimer, QDateTime, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QDateTime, QPoint, QRect, pyqtSignal
 from PyQt6.QtGui import QFont, QPixmap, QMouseEvent
 from PyQt6.QtWidgets import (
     QWidget,
@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QFrame,
     QMenu,
+    QTextEdit,
 )
 
 
@@ -259,14 +260,15 @@ class ListenerPanel(QWidget):
 
         layout.addWidget(reply_widget)
 
-        # ===== 悬浮大文本框（只读预览长文本） =====
-        self._fulltext_preview = QLabel()
-        self._fulltext_preview.setWordWrap(True)
-        self._fulltext_preview.setTextFormat(Qt.TextFormat.PlainText)
+        # ===== 悬浮大文本框 =====
+        self._fulltext_preview = QTextEdit(self)
+        self._fulltext_preview.setReadOnly(True)
+        self._fulltext_preview.setFrameStyle(QFrame.Shape.NoFrame)
+        self._fulltext_preview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._fulltext_preview.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._fulltext_preview.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self._fulltext_preview.setVisible(False)
-        self._fulltext_preview.setMaximumHeight(120)
         self._fulltext_preview.setObjectName("lp_fulltext_preview")
-        layout.addWidget(self._fulltext_preview)
 
     # ── 公开 API ──
 
@@ -629,12 +631,40 @@ class ListenerPanel(QWidget):
         self._at_bar.setVisible(False)
 
     def _on_reply_input_changed(self, text: str):
-        """输入框文本变化时显示/隐藏悬浮预览"""
-        if len(text) > 60:
-            self._fulltext_preview.setText(text)
+        """输入超过20字时在回复栏上方悬浮显示完整文本"""
+        if len(text) > 20:
+            self._fulltext_preview.setPlainText(text)
+            self._position_fulltext_preview()
             self._fulltext_preview.setVisible(True)
+            self._fulltext_preview.raise_()
         else:
             self._fulltext_preview.setVisible(False)
+
+    def _position_fulltext_preview(self):
+        """将悬浮预览定位到输入框下方，向下扩展遮挡日志区"""
+        mw = self.window()
+        if self._fulltext_preview.parent() != mw:
+            self._fulltext_preview.setParent(mw)
+            self._fulltext_preview.show()
+            self._apply_preview_style()
+
+        # 固定宽度，让 QTextEdit document 按此宽度换行后取高度
+        w = self.width() - 16
+        self._fulltext_preview.setFixedWidth(w)
+        self._fulltext_preview.document().setTextWidth(w - 20)  # 减去 padding
+        doc = self._fulltext_preview.document()
+        doc_h = int(doc.size().height())
+        h = min(doc_h + 14, 200)
+        self._fulltext_preview.setFixedHeight(max(h, 32))
+
+        # 定位在输入框正下方，跟 ListenerPanel 左端对齐
+        pt = self.mapTo(mw, QPoint(0, self.height()))
+        self._fulltext_preview.move(pt.x() + 8, pt.y() + 2)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._fulltext_preview.isVisible():
+            self._position_fulltext_preview()
 
     def _switch_group_dropdown(self, gid: str):
         """切换群聊下拉框到指定群"""
@@ -729,6 +759,17 @@ class ListenerPanel(QWidget):
                     break
 
     # ── 主题 ──
+
+    def _apply_preview_style(self):
+        """直接给悬浮预览设置样式（不受父组件 QSS 继承影响）"""
+        bg = "#0d1117" if self._dark else "#ffffff"
+        border = "#30363d" if self._dark else "#d0d7de"
+        text_color = "#e6edf3" if self._dark else "#1f2328"
+        self._fulltext_preview.setStyleSheet(
+            f"background: {bg}; color: {text_color};"
+            f"border: 1px solid {border}; border-radius: 6px;"
+            f"padding: 6px 10px; font-size: 12px;"
+        )
 
     def _apply_theme(self):
         bg = "#0d1117" if self._dark else "#ffffff"
@@ -835,7 +876,7 @@ class ListenerPanel(QWidget):
             QPushButton:hover {{
                 background: {"#21262d" if self._dark else "#e1e4e8"};
             }}
-            QLabel#lp_fulltext_preview {{
+            QTextEdit#lp_fulltext_preview {{
                 background: {bg};
                 color: {text_color};
                 border: 1px solid {border};
@@ -844,3 +885,5 @@ class ListenerPanel(QWidget):
                 font-size: 12px;
             }}
         """)
+        if self._fulltext_preview.isVisible():
+            self._apply_preview_style()

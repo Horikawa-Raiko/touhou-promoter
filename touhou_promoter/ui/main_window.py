@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QLabel, QTreeWidget, QTreeWidgetItem, QTextEdit, QPushButton,
     QProgressBar, QPlainTextEdit, QStatusBar, QMessageBox, QGroupBox,
     QFileDialog, QScrollArea, QLineEdit, QMenu, QApplication, QDialog, QFrame,
+    QHeaderView,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap
@@ -46,6 +47,25 @@ class NapCatSetupWorker(QThread):
                 self.finished.emit(result)
             else:
                 self.failed.emit("NapCat 安装失败，请检查网络连接后重试")
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
+class GroupDetailWorker(QThread):
+    """在后台获取群详情，不阻塞 UI"""
+    finished = pyqtSignal(str, str, dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, client, gid, name, parent=None):
+        super().__init__(parent)
+        self._client = client
+        self._gid = gid
+        self._name = name
+
+    def run(self):
+        try:
+            info = self._client.get_group_info(self._gid, no_cache=False)
+            self.finished.emit(self._gid, self._name, info)
         except Exception as e:
             self.failed.emit(str(e))
 
@@ -872,14 +892,12 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.deselect_all_btn)
         toolbar.addWidget(self.refresh_groups_btn)
         self.group_tree = QTreeWidget()
-        self.group_tree.setHeaderLabels(["分类 / 群名称", ""])
-        self.group_tree.setColumnWidth(0, 300)
+        self.group_tree.setHeaderLabels(["分类 / 群名称"])
+        self.group_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.group_tree.header().setStretchLastSection(True)
+        self.group_tree.header().setSectionsClickable(False)
         self.group_tree.setAlternatingRowColors(True)
         self.group_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.group_tree.setMouseTracking(True)
-        self.group_tree.setToolTip("")
-        self.group_tree.itemEntered.connect(self._on_tree_item_hover)
         self.group_selection_label = QLabel("已选: 0 / 0 群（登录后可刷新交集）")
         self.group_selection_label.setStyleSheet("font-size: 12px; background: transparent;")
         group_layout.addLayout(toolbar)
@@ -1350,6 +1368,7 @@ class MainWindow(QMainWindow):
             self._login_poll_active = False
             self._quick_login_attempting = False
             self._clear_quick_login_buttons()
+            self._onebot = OneBotHTTPClient()
             self._config_mgr.config.last_self_id = uid
             self._config_mgr.config.last_self_nick = nickname
             self._config_mgr.save()
@@ -1763,7 +1782,7 @@ class MainWindow(QMainWindow):
         self.group_tree.clear()
         if not self._intersection:
             self.group_tree.addTopLevelItem(
-                QTreeWidgetItem(["暂无交集群", "请先登录并加载CSV"])
+                QTreeWidgetItem(["暂无交集群"])
             )
             self.group_selection_label.setText("已选: 0 / 0 群")
             return
@@ -1782,13 +1801,13 @@ class MainWindow(QMainWindow):
 
         self._updating_checkboxes = True
         for root in roots:
-            item = QTreeWidgetItem([root.label, ""])
+            item = QTreeWidgetItem([root.label])
             item.setFlags(PARENT_FLAGS)
             item.setCheckState(0, Qt.CheckState.Unchecked)
             item.setData(0, Qt.ItemDataRole.UserRole, "")
             self.group_tree.addTopLevelItem(item)
             for sub in root.children:
-                sub_item = QTreeWidgetItem([sub.label, ""])
+                sub_item = QTreeWidgetItem([sub.label])
                 sub_item.setFlags(PARENT_FLAGS)
                 sub_item.setCheckState(0, Qt.CheckState.Unchecked)
                 sub_item.setData(0, Qt.ItemDataRole.UserRole, "")
@@ -1796,7 +1815,7 @@ class MainWindow(QMainWindow):
                 for leaf in sub.children:
                     gid = leaf.group.group_id if leaf.group else ""
                     name = leaf.group.group_name if leaf.group else leaf.label
-                    leaf_item = QTreeWidgetItem([name, gid])
+                    leaf_item = QTreeWidgetItem([name])
                     leaf_item.setFlags(LEAF_FLAGS)
                     leaf_item.setCheckState(0, Qt.CheckState.Unchecked)
                     leaf_item.setData(0, Qt.ItemDataRole.UserRole, gid)
@@ -1854,27 +1873,6 @@ class MainWindow(QMainWindow):
         self._pre_click_item = None
         self._pre_click_state = None
 
-    def _on_tree_item_hover(self, item: QTreeWidgetItem, column: int):
-        """鼠标悬浮时显示群号和提示"""
-        gid = item.data(0, Qt.ItemDataRole.UserRole) or ""
-        if gid and item.childCount() == 0:
-            self.group_tree.setToolTip(f"群号: {gid}  (Ctrl+C 复制)")
-            self._hovered_gid = gid
-        else:
-            self.group_tree.setToolTip("")
-            self._hovered_gid = ""
-
-    def keyPressEvent(self, event):
-        """Ctrl+C 复制当前悬浮的群号"""
-        if event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            gid = getattr(self, "_hovered_gid", "")
-            if gid:
-                QApplication.clipboard().setText(gid)
-                self._append_log(f"已复制群号: {gid}")
-                event.accept()
-                return
-        super().keyPressEvent(event)
-
     def _on_tree_context_menu(self, pos):
         """右键菜单"""
         item = self.group_tree.itemAt(pos)
@@ -1884,27 +1882,50 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         copy_action = menu.addAction(f"📋 复制群号: {gid}")
         info_action = menu.addAction(f"ℹ️ 查看详情")
-        menu.addSeparator()
-        exclude_action = menu.addAction("🚫 排除此群")
 
         action = menu.exec(self.group_tree.mapToGlobal(pos))
         if action == copy_action:
             QApplication.clipboard().setText(gid)
             self._append_log(f"已复制群号: {gid}")
         elif action == info_action:
-            gid_str = str(gid) if gid else "-"
-            name = item.text(0) or "-"
+            self._show_group_detail(gid, item.text(0))
+
+    def _show_group_detail(self, gid: str, name: str):
+        """通过 OneBot API 获取群详情并显示"""
+        if not self._onebot:
             QMessageBox.information(
                 self, "群详情",
-                f"群号: {gid_str}\n"
-                f"群名称: {name}"
+                f"群名称: {name}\n群号: {gid}"
             )
-        elif action == exclude_action:
-            item.setCheckState(0, Qt.CheckState.Unchecked)
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
-            self._update_parent_check_state(item.parent() or self.group_tree.invisibleRootItem())
-            self._update_selection_count()
-            self._append_log(f"已排除群: {item.text(0)} ({gid})", "warning")
+            return
+        self._append_log(f"[群详情] 正在查询群 {gid}...")
+        self._detail_worker = GroupDetailWorker(self._onebot, gid, name)
+        self._detail_worker.finished.connect(self._on_group_detail_ready)
+        self._detail_worker.failed.connect(
+            lambda e: QMessageBox.warning(self, "群详情", f"获取群信息失败: {e}")
+        )
+        self._detail_worker.start()
+
+    def _on_group_detail_ready(self, gid: str, name: str, info: dict):
+        """群详情 API 返回后显示"""
+        member_count = info.get("member_count", "?")
+        max_members = info.get("max_member_count", "?")
+        group_name = info.get("group_name", name)
+        group_remark = info.get("group_remark", "")
+        all_shut = info.get("group_all_shut", 0)
+
+        lines = [
+            f"群名称: {group_name}",
+            f"群号: {gid}",
+            f"成员数: {member_count}/{max_members}",
+        ]
+        if group_remark:
+            lines.append(f"备注: {group_remark}")
+        if all_shut:
+            lines.append("状态: 全员禁言中")
+
+        QMessageBox.information(self, f"群详情 - {group_name}", "\n".join(lines))
+        self._append_log(f"[群详情] {group_name}({gid}) — 成员{member_count}/{max_members}")
 
     def _on_group_search(self, text: str):
         """搜索过滤群列表"""
