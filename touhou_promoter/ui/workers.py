@@ -37,10 +37,13 @@ class SendWorker(QThread):
         self._config = ConfigManager().config
 
         self._engine: Optional[ForwardingEngine] = None
+        self._stop_requested = False
         self._state = AppState.instance()
         self._state_mgr = SendStateManager()
 
     def run(self):
+        self._probe_nt_ready()
+
         self._engine = ForwardingEngine(
             client=self._client,
             interval=self._config.send_interval,
@@ -68,8 +71,26 @@ class SendWorker(QThread):
 
         self._engine.send(self._message, self._targets, self._start_index)
 
+    def _probe_nt_ready(self):
+        """探测 NT 内核是否就绪：用第一个目标群的 get_group_info 试探，
+        超时则等待重试，最多等 30 秒。避免发送时因内核未就绪而丢失 message_id。"""
+        import time as _time
+        if not self._targets:
+            return
+        gid, _gname = self._targets[0]
+        deadline = _time.time() + 30
+        while _time.time() < deadline:
+            if self._stop_requested:
+                return
+            try:
+                self._client.get_group_info(gid, no_cache=True)
+                return
+            except Exception:
+                _time.sleep(2)
+
     def stop(self):
         """请求中断发送"""
+        self._stop_requested = True
         if self._engine:
             self._engine.stop()
 
