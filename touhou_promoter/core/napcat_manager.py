@@ -374,11 +374,16 @@ class NapCatManager:
         self._state.napcat_status.emit("QQ已启动，请在QQ窗口中扫码登录")
 
     def _on_login_success(self, line: str):
-        self._state.login_status_changed.emit(True, line)
+        self._state.napcat_status.emit("登录成功")
+        # 不 emit login_status_changed(True) —
+        # main_window 的轮询通过 get_login_info() 获取准确的昵称和QQ号
 
     def _on_login_failed(self, reason: str):
-        self._state.login_status_changed.emit(False, reason)
-        self._state.napcat_status.emit(f"登录失败: {reason}")
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", reason).strip()
+        # 截断为简短摘要，避免 stdout 垃圾污染状态栏
+        short = clean[:60] + "..." if len(clean) > 60 else clean
+        self._state.login_status_changed.emit(False, short)
+        self._state.napcat_status.emit(f"登录失败: {short}")
 
     def _on_login_busy(self, qq: str):
         """账号已在别处登录"""

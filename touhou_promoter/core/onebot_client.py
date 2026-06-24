@@ -46,15 +46,22 @@ class OneBotHTTPClient:
         if isinstance(data, dict):
             status = str(data.get("status", "")).lower()
             if status and status not in ("ok", "async"):
+                # NapCat 错误信息可能在 wording / message / data.message 中
+                detail = data.get("wording") or data.get("message") or ""
+                if not detail and isinstance(data.get("data"), dict):
+                    detail = data["data"].get("message", "")
                 raise OneBotAPIError(
-                    f"{action} 返回失败状态: {data.get('wording', status)}",
+                    f"{action} 返回失败状态: {detail or status}",
                     retcode=data.get("retcode"),
                     raw=data,
                 )
             retcode = data.get("retcode")
             if isinstance(retcode, int) and retcode != 0:
+                detail = data.get("wording") or data.get("message") or ""
+                if not detail and isinstance(data.get("data"), dict):
+                    detail = data["data"].get("message", "")
                 raise OneBotAPIError(
-                    f"{action} retcode={retcode}: {data.get('wording', '')}",
+                    f"{action} retcode={retcode}: {detail}",
                     retcode=retcode,
                     raw=data,
                 )

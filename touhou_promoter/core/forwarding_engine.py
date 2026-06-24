@@ -149,14 +149,6 @@ class ForwardingEngine:
         success = 0
         failed = 0
 
-        # 首次发送前预热 NT 内核连接（冷启动时第一次 sendMsg 几乎必超时）
-        first_send = True
-        if start_index == 0:
-            try:
-                self._client.get_group_list()
-            except Exception:
-                pass  # 预热失败不影响后续重试逻辑
-
         for i in range(start_index, total):
             if self._stop_flag:
                 if self.on_stopped:
@@ -170,51 +162,41 @@ class ForwardingEngine:
                 self.on_progress(i + 1, total, group_name, "sending")
 
             # 调用 API 发送
-            # 首条消息需要更多重试：QQ NT 内核冷启动时 sendMsg 容易超时
-            retries = 0
-            max_retries = 3 if first_send else 2
-            first_send = False
             # 纯文本字符串 → 解析 CQ 码后拆分为消息段数组
             msg = message
             if isinstance(msg, str):
                 msg = parse_message_to_segments(msg)
 
-            while True:
-                try:
-                    result = self._client.send_group_msg(group_id, msg, auto_escape=False)
-                    msg_id = str(result.get("message_id", ""))
-                    self._sent_message_ids[group_id] = msg_id
+            try:
+                result = self._client.send_group_msg(group_id, msg, auto_escape=False)
+                msg_id = str(result.get("message_id", ""))
+                self._sent_message_ids[group_id] = msg_id
+                success += 1
+                if self.on_progress:
+                    self.on_progress(i + 1, total, group_name, "ok")
+            except OneBotAPIError as e:
+                reason = str(e)
+                # NapCat NT kernel 超时：消息实际已发出，仅确认回调丢失
+                # 重试会导致重复消息，直接计为成功
+                if "Timeout" in reason and "NTEvent" in reason:
                     success += 1
                     if self.on_progress:
-                        self.on_progress(i + 1, total, group_name, "ok")
-                    break
-                except OneBotAPIError as e:
-                    reason = str(e)
-                    # NapCat NT kernel 超时 — 重试
-                    if "Timeout" in reason and "NTEvent" in reason and retries < max_retries:
-                        retries += 1
-                        if self.on_progress:
-                            self.on_progress(i + 1, total, group_name,
-                                             f"retry:{retries}/{max_retries}")
-                        time.sleep(1 + retries * 0.5)
-                        continue
+                        self.on_progress(i + 1, total, group_name, "ok(NT超时)")
+                else:
                     failed += 1
                     if self.on_progress:
                         self.on_progress(i + 1, total, group_name, f"fail:API错误: {e}")
-                    break
-                except Exception as e:
-                    failed += 1
-                    reason = str(e)
-                    # 判断是否掉线
-                    if is_likely_offline_error(reason):
-                        if self.on_progress:
-                            self.on_progress(i + 1, total, group_name, "fail:掉线")
-                        if self.on_stopped:
-                            self.on_stopped(success, total, dict(self._sent_message_ids))
-                        return False
+            except Exception as e:
+                failed += 1
+                reason = str(e)
+                if is_likely_offline_error(reason):
                     if self.on_progress:
-                        self.on_progress(i + 1, total, group_name, f"fail:{reason}")
-                    break
+                        self.on_progress(i + 1, total, group_name, "fail:掉线")
+                    if self.on_stopped:
+                        self.on_stopped(success, total, dict(self._sent_message_ids))
+                    return False
+                if self.on_progress:
+                    self.on_progress(i + 1, total, group_name, f"fail:{reason}")
 
             # 间隔 + 抖动
             if i < total - 1 and not self._stop_flag:
