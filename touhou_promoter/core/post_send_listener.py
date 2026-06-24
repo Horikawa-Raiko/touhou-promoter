@@ -45,23 +45,21 @@ def _segments_to_cq(message: list) -> str:
 
 
 def _has_meaningful_text(raw_message: str) -> bool:
-    """检查消息除去 CQ 码后是否有实质文本内容（>=2个非数字标点字符）。
+    """检查消息除去 CQ 码后是否有实质文本内容（>=1个字母或数字）。
 
-    使用 Unicode 感知的字符分类，不会误删中文/日文。
+    过滤纯 @ / 纯 CQ 码的噪音消息。
     """
     import re
     import unicodedata
 
     stripped = re.sub(r"\[CQ:[^\]]+\]", "", raw_message)
-    # 统计 Unihan 字符 (CJK + 日文假名) 和英文/数字以外的一般字母
     count = 0
     for ch in stripped:
         cat = unicodedata.category(ch)
-        # Lo = 其他字母（含CJK）, Lm/Lt/Lu/Ll = 各类字母
-        # 排除空白、标点、符号、数字
-        if cat.startswith("L"):
+        # L* = 各类字母（含CJK汉字/日文假名）, Nd = 十进制数字
+        if cat.startswith("L") or cat == "Nd":
             count += 1
-    return count >= 2
+    return count >= 1
 
 
 class PostSendListener(QThread):
@@ -70,8 +68,8 @@ class PostSendListener(QThread):
     使用独立的 WebSocket 连接，不干扰主 WebSocket 生命周期。
     """
 
-    hit_detected = pyqtSignal(str, str, str, str, int)
-    """(group_id, group_name, sender_nick, raw_message, timestamp_seconds)"""
+    hit_detected = pyqtSignal(str, str, str, str, int, str, str)
+    """(group_id, group_name, sender_nick, raw_message, elapsed, message_id, sender_user_id)"""
 
     ws_error = pyqtSignal(str)
     """WebSocket 连接错误"""
@@ -120,21 +118,34 @@ class PostSendListener(QThread):
                 or sender.get("card")
                 or str(sender.get("user_id", ""))
             )
+            sender_user_id = str(sender.get("user_id", ""))
+
+            # 捕获原始消息ID（用于回复时构造 [CQ:reply,id=xxx]）
+            message_id = str(data.get("message_id", ""))
 
             # 检查是否 @Bot
             at_bot = f"[CQ:at,qq={self._self_id}]" in raw_message
+
+            # 检查是否回复（有人右键回复Bot消息）
+            is_reply = "[CQ:reply" in raw_message
 
             # 检查关键词
             msg_lower = raw_message.lower()
             keyword_match = any(kw in msg_lower for kw in self.KEYWORDS)
 
-            if at_bot or keyword_match:
-                # 过滤纯 @ 噪音（没有实质文本内容的 @）
-                if at_bot and not keyword_match and not _has_meaningful_text(raw_message):
+            if at_bot or keyword_match or is_reply:
+                # 过滤纯 @ 噪音（没有实质文本内容），但回复消息不过滤
+                if not is_reply and at_bot and not keyword_match and not _has_meaningful_text(raw_message):
                     return
 
-                self._hits.append((group_id, "", sender_nick, raw_message, int(elapsed)))
-                self.hit_detected.emit(group_id, "", sender_nick, raw_message, int(elapsed))
+                # 尝试从事件数据中获取群名
+                group_name = data.get("group_name", "") or ""
+                if not group_name:
+                    ginfo = data.get("group_info", {}) or {}
+                    group_name = ginfo.get("group_name", "") or ""
+
+                self._hits.append((group_id, group_name, sender_nick, raw_message, int(elapsed), message_id, sender_user_id))
+                self.hit_detected.emit(group_id, group_name, sender_nick, raw_message, int(elapsed), message_id, sender_user_id)
 
         def on_ws_error(err: str):
             self.ws_error.emit(err)

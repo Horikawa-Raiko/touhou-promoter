@@ -18,6 +18,7 @@ class AppConfig:
     listener_expiry_seconds: int = 1200      # 发送后监听过期时间（秒），默认20分钟
     last_self_id: str = ""                   # 上次登录的QQ号
     last_self_nick: str = ""                 # 上次登录的QQ昵称
+    cached_accounts: list = field(default_factory=list)  # [(qq, nickname), ...] 缓存的快登账号
     last_token_path: str = ""                # 上次NapCat token路径（复用登录）
     dark_mode: bool = True                   # 深色/浅色主题（默认深色）
     # LLM配置

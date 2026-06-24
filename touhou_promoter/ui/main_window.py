@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTreeWidget, QTreeWidgetItem, QTextEdit, QPushButton,
     QProgressBar, QPlainTextEdit, QStatusBar, QMessageBox, QGroupBox,
-    QFileDialog, QScrollArea, QLineEdit, QMenu, QApplication,
+    QFileDialog, QScrollArea, QLineEdit, QMenu, QApplication, QDialog,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap
@@ -22,6 +22,20 @@ from touhou_promoter.ui.workers import SendWorker, RecallWorker
 from touhou_promoter.ui.settings_dialog import SettingsDialog
 from touhou_promoter.core.post_send_listener import PostSendListener
 from touhou_promoter.ui.listener_panel import ListenerPanel
+
+
+class NapCatStopWorker(QThread):
+    """在后台线程停止 NapCat，不阻塞 GUI 关闭"""
+    def __init__(self, napcat, parent=None):
+        super().__init__(parent)
+        self._napcat = napcat
+
+    def run(self):
+        try:
+            self._napcat.stop()
+        except Exception:
+            pass
+        self.stopped.emit()
 
 class NapCatSetupWorker(QThread):
     """在子线程中搜索/下载 NapCat，避免阻塞 GUI"""
@@ -47,6 +61,71 @@ class NapCatSetupWorker(QThread):
                 self.failed.emit("NapCat 安装失败，请检查网络连接后重试")
         except Exception as e:
             self.failed.emit(str(e))
+
+
+class QuickLoginDialog(QDialog):
+    """快速登录账号选择弹窗"""
+    def __init__(self, accounts: list, parent=None, show_scan_option: bool = False):
+        super().__init__(parent)
+        self.setWindowTitle("快速登录")
+        self.setMinimumWidth(320)
+        self._selected_qq = ""
+        self._scan_mode = False
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        title = QLabel("检测到以下已缓存账号，点击即可免扫码登录：")
+        title.setWordWrap(True)
+        title.setStyleSheet("font-size: 13px;")
+        layout.addWidget(title)
+
+        for qq, nickname in accounts:
+            label = f"{nickname} ({qq})" if nickname else qq
+            btn = QPushButton(label)
+            btn.setFixedHeight(38)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda checked, q=qq: self._select(q))
+            layout.addWidget(btn)
+
+        if show_scan_option:
+            scan_btn = QPushButton("扫码登录（不使用缓存账号）")
+            scan_btn.setFixedHeight(38)
+            scan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            scan_btn.setStyleSheet("color: #888; font-size: 12px;")
+            scan_btn.clicked.connect(self._select_scan)
+            layout.addWidget(scan_btn)
+
+    def _select_scan(self):
+        self._scan_mode = True
+        self.accept()
+
+    def _select(self, qq: str):
+        self._selected_qq = qq
+        self.accept()
+
+    def selected_qq(self) -> str:
+        return self._selected_qq
+
+    def is_scan_mode(self) -> bool:
+        return self._scan_mode
+
+
+class GetLoginWorker(QThread):
+    """OneBot HTTP 就绪后单次获取登录信息"""
+    login_done = pyqtSignal(bool, str, str)  # (ok, uid, nickname)
+
+    def run(self):
+        try:
+            client = OneBotHTTPClient(timeout=5.0)
+            info = client.get_login_info()
+            uid = str(info.get("user_id", ""))
+            nickname = info.get("nickname", "")
+            self.login_done.emit(True, uid, nickname)
+        except Exception as e:
+            self.login_done.emit(False, "", str(e))
+
 
 class MainWindow(QMainWindow):
     """东方Project一键宣发姬 主窗口"""
@@ -107,30 +186,42 @@ class MainWindow(QMainWindow):
         border-color: #d0d7de;
     }
 
-    /* === 主操作按钮 — 红色强调 === */
+    /* === 主操作按钮 — 绿色启动 === */
     QPushButton#loginBtn, QPushButton#sendBtn {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #2ea043, stop:1 #238636);
+        border-color: #238636;
+        color: #fff;
+        font-weight: bold;
+    }
+    QPushButton#loginBtn:hover, QPushButton#sendBtn:hover {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #3fb950, stop:1 #2ea043);
+    }
+    /* === 登录按钮 — 快速登录模式（蓝色） === */
+    QPushButton#loginBtn[mode="quick"] {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #1a73e8, stop:1 #1557b0);
+        border-color: #1557b0;
+        color: #fff;
+        font-weight: bold;
+    }
+    QPushButton#loginBtn[mode="quick"]:hover {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #4a90d9, stop:1 #1a73e8);
+    }
+
+    /* === 退出按钮 — 红色 === */
+    QPushButton#logoutBtn {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
             stop:0 #e63946, stop:1 #c1121f);
         border-color: #c1121f;
         color: #fff;
         font-weight: bold;
     }
-    QPushButton#loginBtn:hover, QPushButton#sendBtn:hover {
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #f25c67, stop:1 #e63946);
-    }
-
-    /* === 绿色按钮 === */
-    QPushButton#logoutBtn {
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #2b9348, stop:1 #1b6b2a);
-        border-color: #2b9348;
-        color: #fff;
-        font-weight: bold;
-    }
     QPushButton#logoutBtn:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #3cb054, stop:1 #2b9348);
+            stop:0 #f25c67, stop:1 #e63946);
     }
 
     /* === 危险按钮 === */
@@ -378,33 +469,45 @@ class MainWindow(QMainWindow):
         border-color: #21262d;
     }
 
-    /* === 主操作按钮 — 强调色 === */
+    /* === 主操作按钮 — 绿色启动 === */
     QPushButton#loginBtn, QPushButton#sendBtn {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #2ea043, stop:1 #238636);
+        border-color: #3fb950;
+        color: #fff;
+        font-weight: bold;
+    }
+    QPushButton#loginBtn:hover, QPushButton#sendBtn:hover {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #3fb950, stop:1 #2ea043);
+    }
+    QPushButton#loginBtn:pressed, QPushButton#sendBtn:pressed {
+        background: #238636;
+    }
+    /* === 登录按钮 — 快速登录模式（蓝色） === */
+    QPushButton#loginBtn[mode="quick"] {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #1a73e8, stop:1 #1557b0);
+        border-color: #4a90d9;
+        color: #fff;
+        font-weight: bold;
+    }
+    QPushButton#loginBtn[mode="quick"]:hover {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #4a90d9, stop:1 #1a73e8);
+    }
+
+    /* === 退出按钮 — 红色 === */
+    QPushButton#logoutBtn {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
             stop:0 #da3633, stop:1 #b62324);
         border-color: #f85149;
         color: #fff;
         font-weight: bold;
     }
-    QPushButton#loginBtn:hover, QPushButton#sendBtn:hover {
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #f85149, stop:1 #da3633);
-    }
-    QPushButton#loginBtn:pressed, QPushButton#sendBtn:pressed {
-        background: #b62324;
-    }
-
-    /* === 登录成功按钮 — 绿色 === */
-    QPushButton#logoutBtn {
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #238636, stop:1 #1a6b2a);
-        border-color: #3fb950;
-        color: #fff;
-        font-weight: bold;
-    }
     QPushButton#logoutBtn:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #3fb950, stop:1 #238636);
+            stop:0 #f85149, stop:1 #da3633);
     }
 
     /* === 危险按钮 — 中断/撤回 === */
@@ -616,11 +719,13 @@ class MainWindow(QMainWindow):
         self._image_paths: list[str] = []  # ordered list of image file paths
         self._b64_to_path: dict[str, str] = {}  # base64 data -> file path mapping
         self._dark_mode = self._config_mgr.config.dark_mode
+        self._quick_login_accounts: list = []     # 缓存的快登账号
+        self._quick_login_attempting = False    # 是否正在尝试快速登录
 
         self._log_entries: list[tuple[str, str]] = []  # [(msg, level), ...]
 
         self.setWindowTitle("东方Project一键宣发姬")
-        self.resize(1100, 720)
+        self.resize(1080, 800)
         self.setStyleSheet(self._THEME if self._dark_mode else self._THEME_LIGHT)
 
         self._build_menu()
@@ -629,7 +734,7 @@ class MainWindow(QMainWindow):
         self._connect_state_signals()
         self._connect_ui_signals()
 
-        self._append_log("[系统] 🔮 东方Project一键宣发姬 已就绪")
+        self._append_log("[系统] 东方Project一键宣发姬 已就绪")
 
         # 自动加载上次打开的CSV
         csv_path = self._config_mgr.config.csv_path
@@ -643,11 +748,18 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self._append_log(f"[CSV] 自动加载失败: {e}")
 
+        # 旧配置迁移：有 last_self_id 但 cached_accounts 为空 → 自动填充
+        cached = self._config_mgr.config.cached_accounts
+        if (not cached or not any(q for q, _ in cached)) and self._config_mgr.config.last_self_id:
+            cached = [[self._config_mgr.config.last_self_id, self._config_mgr.config.last_self_nick]]
+            self._config_mgr.config.cached_accounts = cached
+            self._config_mgr.save()
+
     # ================================================================
     # 窗口关闭 → 清理
     # ================================================================
     def closeEvent(self, event):
-        """窗口关闭时停止所有后台任务并退出NapCat"""
+        """窗口关闭时停止所有后台任务，NapCat 放入后台线程清理避免阻塞"""
         # 停止发送/撤回线程
         if self._send_worker and self._send_worker.isRunning():
             self._send_worker.stop()
@@ -661,12 +773,10 @@ class MainWindow(QMainWindow):
         # 停止监听线程
         self._stop_post_listener()
 
-        # 监听面板随窗口关闭
-
-        # 停止 NapCat (连带 QQ.exe)
-        self._login_poll_active = False
+        # NapCat 停止放入后台线程，窗口立即关闭不卡顿
         if self._napcat:
-            self._napcat.stop()
+            self._napcat_stop_worker = NapCatStopWorker(self._napcat)
+            self._napcat_stop_worker.start()
             self._napcat = None
 
         super().closeEvent(event)
@@ -713,44 +823,32 @@ class MainWindow(QMainWindow):
 
         self.qr_label = QLabel()
         self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.qr_label.setMinimumSize(200, 200)
+        self.qr_label.setMinimumSize(160, 160)
         self.qr_label.setStyleSheet(
             "border: 2px dashed #8c959f; border-radius: 12px;"
             "font-size: 14px; background: transparent;"
         )
-        self.qr_label.setText("🔮\n请点击下方按钮\n启动NapCat并扫码")
+        self.qr_label.setText("请点击下方按钮\n启动NapCat并登录")
 
         self.login_status_label = QLabel("状态: 未登录")
         self.login_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.login_status_label.setStyleSheet("font-size: 12px; background: transparent;")
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-        self.login_btn = QPushButton("🚀 启动NapCat并扫码")
+        btn_row.setSpacing(6)
+        self.login_btn = QPushButton("启动并登录")
         self.login_btn.setObjectName("loginBtn")
-        self.logout_btn = QPushButton("断开连接")
+        f = self.login_btn.font(); f.setPointSize(10); self.login_btn.setFont(f)
+        self.logout_btn = QPushButton("退出登录")
         self.logout_btn.setObjectName("logoutBtn")
-        self.logout_btn.setEnabled(False)
+        self.logout_btn.hide()
+        f = self.logout_btn.font(); f.setPointSize(10); self.logout_btn.setFont(f)
         btn_row.addWidget(self.login_btn)
         btn_row.addWidget(self.logout_btn)
-
-        # 快速登录账号按钮
-        self.quick_login_group = QGroupBox("⚡ 快速登录（免扫码）")
-        self.quick_login_group.setVisible(False)
-        self.quick_login_layout = QVBoxLayout(self.quick_login_group)
-        self.quick_login_layout.setSpacing(6)
-        self.quick_login_label = QLabel("检测到以下已缓存账号，点击即可登录：")
-        self.quick_login_label.setWordWrap(True)
-        self.quick_login_label.setStyleSheet("font-size: 12px; background: transparent;")
-        self.quick_login_layout.addWidget(self.quick_login_label)
-        self.quick_login_btns_layout = QVBoxLayout()
-        self.quick_login_btns_layout.setSpacing(4)
-        self.quick_login_layout.addLayout(self.quick_login_btns_layout)
 
         login_layout.addWidget(self.qr_label)
         login_layout.addWidget(self.login_status_label)
         login_layout.addLayout(btn_row)
-        login_layout.addWidget(self.quick_login_group)
         left_layout.addWidget(login_group)
 
         # -- 群列表区 --
@@ -768,7 +866,9 @@ class MainWindow(QMainWindow):
         toolbar.setSpacing(6)
         self.select_all_btn = QPushButton("全选")
         self.deselect_all_btn = QPushButton("取消全选")
-        self.refresh_groups_btn = QPushButton("🔄 刷新交集")
+        self.refresh_groups_btn = QPushButton("刷新交集")
+        for b in (self.select_all_btn, self.deselect_all_btn, self.refresh_groups_btn):
+            f = b.font(); f.setPointSize(10); b.setFont(f)
         toolbar.addWidget(self.select_all_btn)
         toolbar.addWidget(self.deselect_all_btn)
         toolbar.addWidget(self.refresh_groups_btn)
@@ -782,7 +882,7 @@ class MainWindow(QMainWindow):
         group_layout.addLayout(toolbar)
         group_layout.addWidget(self.group_tree)
         group_layout.addWidget(self.group_selection_label)
-        left_layout.addWidget(group_group)
+        left_layout.addWidget(group_group, 1)
 
         splitter.addWidget(left)
 
@@ -889,14 +989,28 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(log_group, 1)
 
         splitter.addWidget(right)
-        splitter.setSizes([280, 380, 420])
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        splitter.setCollapsible(2, False)
 
+        left.setMinimumWidth(300)
+        msg_editor.setMinimumWidth(340)
+        right.setMinimumWidth(350)
+
+        self._main_splitter = splitter
         main_layout = QHBoxLayout(central)
         main_layout.addWidget(splitter)
 
-    # ================================================================
-    # 状态栏
-    # ================================================================
+    def showEvent(self, event):
+        super().showEvent(event)
+        if hasattr(self, '_main_splitter') and not getattr(self, '_splitter_seeded', False):
+            self._splitter_seeded = True
+            total = self._main_splitter.width()
+            lw = int(total * 0.30)
+            mw = int(total * 0.32)
+            rw = total - lw - mw
+            self._main_splitter.setSizes([lw, mw, rw])
+
     def _build_statusbar(self):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -919,13 +1033,23 @@ class MainWindow(QMainWindow):
         st.group_intersection_ready.connect(self._on_intersection_ready)
         st.quick_login_accounts.connect(self._on_quick_login_accounts)
         st.login_busy_detected.connect(self._on_login_busy_detected)
+        st.onebot_ready.connect(self._on_onebot_ready)
         st.send_started.connect(self._on_send_started)
         st.send_progress.connect(self._on_send_progress)
         st.send_completed.connect(self._on_send_completed)
         st.send_interrupted.connect(self._on_send_interrupted)
 
+    def _on_onebot_ready(self, http_port: int, ws_port: int):
+        """OneBot 适配器已就绪 — 立即触发一次登录检测（不等轮询周期）"""
+        if getattr(self, "_login_poll_active", False):
+            QTimer.singleShot(500, self._start_login_poll)
+
     def _on_qr_image_ready(self, path: str):
-        """NapCat 生成了 QR 码图片，直接显示在界面上"""
+        """NapCat 生成了 QR 码图片"""
+        # 不在此处清除 _quick_login_attempting：
+        # QR 可能在快登模式的 NapCat 中短暂出现（autoLoginAccount 失败前会
+        # 先生成 QR），如果这里清除标记，紧接着 login_busy 到达时
+        # _on_login_busy_detected 会误以为不在快登流程中而忽略错误。
         pixmap = QPixmap(path)
         if not pixmap.isNull():
             scaled = pixmap.scaled(
@@ -1018,28 +1142,47 @@ class MainWindow(QMainWindow):
                 "border: 2px dashed #8c959f; border-radius: 12px;"
                 "font-size: 14px; background: transparent;"
             )
+            if not self._napcat or not self._napcat.is_running():
+                self._set_login_btn_mode("scan")
+
+    def _set_login_btn_mode(self, mode: str):
+        """切换登录区域按钮: scan(绿色启动) / quick(蓝色快登) / online(红色退出)"""
+        if mode == "online":
+            self.login_btn.hide()
+            self.logout_btn.show()
+            self.logout_btn.setEnabled(True)
+        elif mode == "quick":
+            self.login_btn.setText("快速登录")
+            self.login_btn.setProperty("mode", "quick")
+            self.login_btn.setEnabled(True)
+            self.login_btn.style().unpolish(self.login_btn)
+            self.login_btn.style().polish(self.login_btn)
+            self.login_btn.show()
+            self.logout_btn.hide()
+        else:  # scan
+            self.login_btn.setText("启动并登录")
+            self.login_btn.setProperty("mode", "scan")
+            self.login_btn.setEnabled(True)
+            self.login_btn.style().unpolish(self.login_btn)
+            self.login_btn.style().polish(self.login_btn)
+            self.login_btn.show()
+            self.logout_btn.hide()
 
     def _on_login_status_changed(self, online: bool, info: str):
         """登录状态变化"""
         if online:
-            self.login_status_label.setText("状态: ✅ 在线")
-            self.status_online.setText("\U0001f7e2 在线")
+            self.login_status_label.setText("状态: 在线")
+            self.status_online.setText("在线")
             self.status_qq.setText(f"QQ: {info}")
-            self.login_btn.setEnabled(False)
-            self.logout_btn.setEnabled(True)
-            self.quick_login_group.setVisible(False)
+            self._set_login_btn_mode("online")
             self._append_log(f"[登录] 登录成功! {info}")
-            # 登录成功后自动获取群列表并求交集
             self._auto_refresh_intersection()
-            # 检测是否有未完成的发送会话（断点续传）
             self._check_breakpoint_resume()
         else:
-            self.login_status_label.setText(f"状态: ❌ {info}")
-            self.status_online.setText("⚪ 离线")
+            self.login_status_label.setText(f"状态: {info}")
+            self.status_online.setText("离线")
             self.status_qq.setText("QQ: -")
-            self.login_btn.setEnabled(True)
-            self.logout_btn.setEnabled(False)
-            self._append_log(f"[登录] 登录失败: {info}")
+            # 保持当前按钮状态不变（可能是快登中/扫码中）
 
     def _on_intersection_ready(self, joined_ids: set):
         """收到 bot 实际加入的群号集合"""
@@ -1073,7 +1216,48 @@ class MainWindow(QMainWindow):
 
     # ---- 登录 ----
     def _on_login_clicked(self):
-        """一键登录：自动查找/下载NapCat → 启动 → 等扫码"""
+        """登录按钮：
+        - "启动并登录" → 弹窗（可快登可扫码），选账号=快登，选扫码=纯扫码
+        - "快速登录" → NapCat已运行，弹窗（无扫码选项），选账号=杀进程快登
+        """
+        if self._onebot is not None:
+            self._append_log("[登录] 已在线，无需重新登录", "info")
+            return
+
+        cached = self._config_mgr.config.cached_accounts
+        cached = [(q, n) for q, n in cached if q]
+
+        # NapCat 已运行（扫码模式）→ 弹窗快登（不显示"扫码登录"选项）
+        if self._napcat and self._napcat.is_running():
+            if cached:
+                dlg = QuickLoginDialog(cached, self, show_scan_option=False)
+                if dlg.exec() == QDialog.DialogCode.Accepted:
+                    qq = dlg.selected_qq()
+                    if qq:
+                        self._do_quick_login_restart(qq)
+            else:
+                self._append_log("[登录] 暂无缓存账号，请扫码登录", "info")
+            return
+
+        # NapCat 未运行 → 弹窗选号或扫码
+        if cached:
+            dlg = QuickLoginDialog(cached, self, show_scan_option=True)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            if dlg.is_scan_mode():
+                # 用户选了"扫码登录"
+                self._pending_qq = ""
+                self._quick_login_attempting = False
+            else:
+                qq = dlg.selected_qq()
+                if not qq:
+                    return
+                self._pending_qq = qq
+                self._quick_login_attempting = True
+        else:
+            self._pending_qq = ""
+            self._quick_login_attempting = False
+
         self.login_btn.setEnabled(False)
         self.login_status_label.setText("状态: 正在准备 NapCat...")
         self._append_log("[登录] 正在搜索/下载 NapCat（首次需下载约30MB）...")
@@ -1095,16 +1279,21 @@ class MainWindow(QMainWindow):
             self.login_status_label.setText(f"状态: 下载 {filename} {pct}%")
 
     def _on_setup_finished(self, napcat_root: str):
-        """NapCat 准备就绪，启动（扫码模式，检测到缓存账号后显示快登按钮）"""
+        """NapCat 准备就绪，按模式启动"""
         self._config_mgr.config.napcat_path = napcat_root
         self._config_mgr.save()
         self._append_log(f"[登录] NapCat 路径: {napcat_root}")
 
+        qq = getattr(self, "_pending_qq", "")
         self._napcat = NapCatManager(napcat_root)
-        if self._napcat.start():  # 扫码模式，让 NapCat 输出缓存账号
-            self.login_status_label.setText("状态: NapCat 已启动，等待扫码...")
+        if self._napcat.start(qq=qq):
+            self._set_login_btn_mode("quick")
+            if qq:
+                self.login_status_label.setText(f"状态: 正在快速登录 {qq}...")
+            else:
+                self.login_status_label.setText("状态: NapCat 已启动，等待扫码...")
             self._login_retry_count = 0
-            self._login_retry_max = 60
+            self._login_retry_max = 30
             self._login_poll_active = True
             self._start_login_poll()
         else:
@@ -1112,15 +1301,15 @@ class MainWindow(QMainWindow):
             self.login_btn.setEnabled(True)
             self._append_log("[错误] NapCat 启动失败")
 
-    def _start_login_poll(self):
-        """启动登录轮询：每 2 秒调一次 get_login_info，直到成功"""
+    def _start_login_poll(self, delay_ms: int = 0):
+        """启动登录轮询 — 自适应间隔：前10次1s，之后2s"""
         if not getattr(self, "_login_poll_active", True):
             return
         if not self._napcat or not self._napcat.is_running():
             return
 
         class LoginCheckWorker(QThread):
-            login_result = pyqtSignal(bool, str, str)  # (ok, uid, nickname)
+            login_result = pyqtSignal(bool, str, str)
 
             def run(self_):
                 try:
@@ -1134,16 +1323,21 @@ class MainWindow(QMainWindow):
 
         self._login_checker = LoginCheckWorker()
         self._login_checker.login_result.connect(self._on_login_poll_result)
-        self._login_checker.start()
+        if delay_ms > 0:
+            QTimer.singleShot(delay_ms, self._login_checker.start)
+        else:
+            self._login_checker.start()
 
     def _on_login_poll_result(self, ok: bool, uid: str, nickname: str):
         if not getattr(self, "_login_poll_active", True):
             return
         if ok:
             self._login_poll_active = False
+            self._quick_login_attempting = False
+            self._clear_quick_login_buttons()
             self._config_mgr.config.last_self_id = uid
             self._config_mgr.config.last_self_nick = nickname
-            self._config_mgr.save()
+            self._merge_cached_accounts([(uid, nickname)])
             label = f"{nickname} ({uid})" if nickname else uid
             self._state.login_status_changed.emit(True, label)
             return
@@ -1152,59 +1346,59 @@ class MainWindow(QMainWindow):
         if self._login_retry_count < self._login_retry_max:
             if self._login_retry_count <= 5 or self._login_retry_count % 10 == 0:
                 self._append_log(f"[登录] 等待中... ({self._login_retry_count}/{self._login_retry_max})")
-            QTimer.singleShot(2000, self._start_login_poll)
+            interval = 1000 if self._login_retry_count < 10 else 2000
+            QTimer.singleShot(interval, self._start_login_poll)
         else:
             self._append_log(f"[登录] 超时：{self._login_retry_max}次尝试后仍未连接")
             self.login_btn.setEnabled(True)
 
-    def _on_quick_login_accounts(self, accounts: list):
-        """检测到快速登录账号，显示账号选择按钮"""
-        # 清空旧按钮
-        while self.quick_login_btns_layout.count():
-            child = self.quick_login_btns_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
-        for qq, nickname in accounts:
-            btn = QPushButton(f"⚡ {nickname} ({qq})")
-            btn.setProperty("qq", qq)
-            btn.setProperty("cssClass", "quickLogin")
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(self._on_quick_login_btn_clicked)
-            self.quick_login_btns_layout.addWidget(btn)
-
-        self.quick_login_group.setVisible(True)
-        self._append_log(f"[登录] 检测到 {len(accounts)} 个缓存账号，可免扫码快速登录")
-
-    def _on_quick_login_btn_clicked(self):
-        """快速登录按钮点击 — 通过 sender().property('qq') 获取QQ号"""
-        btn = self.sender()
-        if btn:
-            qq = btn.property("qq")
+    def _merge_cached_accounts(self, new_accounts: list):
+        """合并账号到缓存，按QQ号去重，优先保留有昵称的条目"""
+        merged: dict[str, str] = {}
+        # 先加载已有缓存
+        for qq, nick in self._config_mgr.config.cached_accounts:
             if qq:
-                self._do_quick_login(qq)
+                merged[qq] = nick if nick else merged.get(qq, "")
+        # 新数据覆盖（优先保留有昵称的）
+        for qq, nick in new_accounts:
+            if qq:
+                if nick or qq not in merged:
+                    merged[qq] = nick
+        # 上次登录排最前
+        last_id = self._config_mgr.config.last_self_id
+        sorted_items = sorted(merged.items(), key=lambda a: (a[0] != last_id, a[0]))
+        self._config_mgr.config.cached_accounts = [list(a) for a in sorted_items[:5]]
+        self._config_mgr.save()
 
-    def _do_quick_login(self, qq: str):
-        """执行快速登录：停止当前NapCat，用 -q 参数重启"""
-        self._append_log(f"[登录] 使用账号 {qq} 快速登录...")
-        self.quick_login_group.setVisible(False)
-        self.login_status_label.setText(f"状态: 正在以 {qq} 快速登录...")
-        # 停掉旧的轮询链
+    def _on_quick_login_accounts(self, accounts: list):
+        """检测到快速登录账号 — 保存到配置 + 渲染内联快登按钮"""
+        if not accounts:
+            return
+        self._merge_cached_accounts(accounts)
+        self._quick_login_accounts = accounts
+        self._append_log(f"[登录] 检测到 {len(accounts)} 个缓存账号（已保存，下次启动可快速登录）")
+
+        # 扫码模式下，在二维码下方渲染快捷登录按钮
+        if not self._quick_login_attempting and self._napcat and self._napcat.is_running() and self._onebot is None:
+            self._render_inline_quick_login_buttons(accounts)
+
+    def _do_quick_login_restart(self, qq: str):
+        """NapCat 已在运行（扫码模式），杀掉后用指定账号重启快登"""
+        self._quick_login_attempting = True
         self._login_poll_active = False
+        self._clear_quick_login_buttons()
+        self.login_status_label.setText(f"状态: 正在切换快速登录 {qq}...")
+        self._append_log(f"[登录] 切换快速登录 {qq}，重启 NapCat...")
 
-        # 停止当前 NapCat
         if self._napcat:
             self._napcat.stop()
+            self._napcat = None
 
-        # 等进程完全退出后再重启（给 taskkill 足够清理时间）
-        QTimer.singleShot(3000, lambda: self._restart_with_quick_login(qq))
-
-    def _restart_with_quick_login(self, qq: str):
-        """用 -q 参数重启 NapCat"""
         napcat_root = self._config_mgr.config.napcat_path
         if not napcat_root:
-            self._append_log("[错误] NapCat 路径未配置")
-            self.login_btn.setEnabled(True)
+            self._append_log("[错误] NapCat 路径未知")
+            self._quick_login_attempting = False
+            self._set_login_btn_mode("scan")
             return
 
         self._config_mgr.config.last_self_id = qq
@@ -1212,26 +1406,141 @@ class MainWindow(QMainWindow):
 
         self._napcat = NapCatManager(napcat_root)
         if self._napcat.start(qq=qq):
+            self._set_login_btn_mode("quick")
             self.login_status_label.setText(f"状态: 正在快速登录 {qq}...")
             self._login_retry_count = 0
-            self._login_retry_max = 60
+            self._login_retry_max = 30
             self._login_poll_active = True
             self._start_login_poll()
         else:
-            self.login_status_label.setText("状态: 快登启动失败")
-            self.login_btn.setEnabled(True)
+            self._quick_login_attempting = False
+            self._set_login_btn_mode("scan")
+            self._append_log("[错误] 快登启动失败")
+
+    def _on_recheck_quick_login(self):
+        """手动触发快速登录（扫描模式下点按钮时调用）"""
+        if self._onebot is not None:
+            self._append_log("[登录] 已在线，无需重新登录", "info")
+            return
+
+        cached = self._config_mgr.config.cached_accounts
+        cached = [(q, n) for q, n in cached if q]
+        if not cached:
+            if self._napcat and self._napcat.is_running():
+                self._append_log("[登录] 暂无缓存账号，请扫码登录", "warn")
+            else:
+                self._append_log("[登录] NapCat未运行，请先点击启动", "warn")
+            return
+
+        # NapCat 已在扫码模式运行 → 直接 kill+重启快登
+        if self._napcat and self._napcat.is_running():
+            dlg = QuickLoginDialog(cached, self)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                qq = dlg.selected_qq()
+                if qq:
+                    self._do_quick_login_restart(qq)
+            return
+
+        # NapCat 未运行 → 走完整 setup 流程
+        dlg = QuickLoginDialog(cached, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        qq = dlg.selected_qq()
+        if not qq:
+            return
+        self._pending_qq = qq
+        self._quick_login_attempting = True
+        self.login_btn.setEnabled(False)
+        self.login_status_label.setText("状态: 正在准备 NapCat...")
+        self._setup_worker = NapCatSetupWorker(self._config_mgr.state_dir())
+        self._setup_worker.status.connect(self._on_setup_status)
+        self._setup_worker.progress.connect(self._on_setup_progress)
+        self._setup_worker.finished.connect(self._on_setup_finished)
+        self._setup_worker.failed.connect(self._on_setup_failed)
+        self._setup_worker.start()
+
+    # ---- 扫码模式下内联快登按钮 ----
+    def _render_inline_quick_login_buttons(self, accounts: list):
+        """在二维码下方动态渲染快登按钮"""
+        if not hasattr(self, '_quick_login_btn_layout'):
+            self._quick_login_btn_layout = QVBoxLayout()
+            self._quick_login_btn_layout.setSpacing(2)
+            parent_layout = self.login_status_label.parent().layout()
+            if parent_layout:
+                idx = parent_layout.indexOf(self.login_status_label)
+                if idx >= 0:
+                    parent_layout.insertLayout(idx + 1, self._quick_login_btn_layout)
+                else:
+                    parent_layout.addLayout(self._quick_login_btn_layout)
+
+        self._clear_quick_login_buttons()
+
+        label = QLabel("快速登录:")
+        label.setStyleSheet("font-size: 10px; background: transparent; padding: 2px 0;")
+        self._quick_login_btn_layout.addWidget(label)
+
+        for qq, nickname in accounts:
+            if not qq:
+                continue
+            label = f"  {nickname} ({qq})" if nickname else f"  {qq}"
+            btn = QPushButton(label)
+            btn.setFixedHeight(28)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda checked, q=qq: self._do_quick_login_restart(q))
+            self._quick_login_btn_layout.addWidget(btn)
+
+    def _clear_quick_login_buttons(self):
+        """清除内联快登按钮"""
+        if hasattr(self, '_quick_login_btn_layout'):
+            while self._quick_login_btn_layout.count():
+                item = self._quick_login_btn_layout.takeAt(0)
+                w = item.widget()
+                if w:
+                    w.deleteLater()
+            try:
+                parent_layout = self.login_status_label.parent().layout()
+                if parent_layout:
+                    parent_layout.removeItem(self._quick_login_btn_layout)
+            except Exception:
+                pass
 
     def _on_login_busy_detected(self, qq: str):
-        """账号已在别处登录 — 停止轮询并恢复按钮"""
-        msg = f"账号 {qq} 已在别处登录，请尝试其他账号或退出其他设备上的QQ" if qq else \
-              "当前账号已在别处登录，无法重复登录"
-        self._append_log(f"[登录] ⚠ {msg}")
-        self.login_status_label.setText(f"状态: 账号{qq}已在别处登录" if qq else "状态: 当前账号已在别处登录")
+        """账号已在别处登录 → 重启纯扫码模式"""
+        if self._quick_login_attempting:
+            self._append_log(f"[登录] 账号{qq}快登失败（会话未过期），切换扫码模式...")
+            self.login_status_label.setText(f"状态: {qq} 会话未过期，切换扫码中...")
+        else:
+            self._append_log(f"[登录] NapCat 自发快登 {qq} 失败，重启纯扫码模式...")
+            self.login_status_label.setText("状态: 旧会话冲突，切换扫码中...")
+        self._fallback_to_scan(qq)
+
+    def _fallback_to_scan(self, qq: str):
+        """快登失败 → 强杀并重启纯扫码模式"""
+        self._quick_login_attempting = False
         self._login_poll_active = False
+        self._clear_quick_login_buttons()
+        self._append_log(f"[登录] 切换纯扫码模式...")
+        self.login_status_label.setText("状态: 正在切换扫码模式...")
+        self._login_poll_active = False
+
+        if self._napcat:
+            self._napcat.stop()
+            self._napcat = None
+
+        napcat_root = self._config_mgr.config.napcat_path
+        if napcat_root:
+            self._napcat = NapCatManager(napcat_root)
+            if self._napcat.start():  # 不传 qq = 纯扫码
+                self._set_login_btn_mode("quick")
+                self.login_status_label.setText("状态: 请扫码登录")
+                self._login_retry_count = 0
+                self._login_retry_max = 30
+                self._login_poll_active = True
+                self._start_login_poll()
+                return
+        self._set_login_btn_mode("scan")
         self.login_btn.setEnabled(True)
-        # 快登失败：重新显示按钮让用户选其他账号
-        if self.quick_login_btns_layout.count() > 0:
-            self.quick_login_group.setVisible(True)
+        self._append_log("[错误] 切换扫码模式失败")
 
     def _on_setup_failed(self, error: str):
         self.login_status_label.setText(f"状态: {error}")
@@ -1239,30 +1548,35 @@ class MainWindow(QMainWindow):
         self._append_log(f"[错误] {error}")
 
     def _on_logout_clicked(self):
+        """退出登录：停一切，回到未登录状态"""
         self._login_poll_active = False
-        if self._napcat:
-            self._napcat.stop()
-            self._napcat = None
+        self._quick_login_attempting = False
+        self._clear_quick_login_buttons()
         self._onebot = None
         self._joined_groups.clear()
         self._intersection.clear()
         self.qr_label.clear()
-        self.qr_label.setText("🔮\n请点击下方按钮\n启动NapCat并扫码")
+        self.qr_label.setText("请点击下方按钮\n启动NapCat并登录")
         self.qr_label.setStyleSheet(
             "border: 2px dashed #8c959f; border-radius: 12px;"
             "font-size: 14px; background: transparent;"
         )
         self.login_status_label.setText("状态: 未登录")
-        self.status_online.setText("⚪ 离线")
+        self.status_online.setText("离线")
         self.status_qq.setText("QQ: -")
         self.status_last_send.setText("上次发送: -")
-        self.login_btn.setEnabled(True)
         self.logout_btn.setEnabled(False)
-        self.quick_login_group.setVisible(False)
         self._csv_records.clear()
         self.group_tree.clear()
         self.group_selection_label.setText("已选: 0 / 0 群（登录后可刷新交集）")
-        self._append_log("[登录] 已断开连接")
+        self._append_log("[登录] 已退出登录")
+
+        # 停 NapCat
+        if self._napcat:
+            self._napcat.stop()
+            self._napcat = None
+
+        self._set_login_btn_mode("scan")
 
     def _check_breakpoint_resume(self):
         """检测是否有未完成的发送会话，提示用户是否继续"""

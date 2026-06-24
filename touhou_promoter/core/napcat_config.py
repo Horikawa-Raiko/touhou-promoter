@@ -11,7 +11,10 @@ from typing import Optional
 
 
 def set_auto_login_account(napcat_root: str, qq: str):
-    """在 webui.json 中设置 autoLoginAccount，NapCat 启动后自动以该账号登录"""
+    """在 webui.json 中设置/清除 autoLoginAccount。
+
+    qq 非空时写入，为空时删除该 key 以确保 NapCat 进入扫码模式。
+    """
     config_dir = find_napcat_config_dir(napcat_root)
     webui_path = os.path.join(config_dir, "webui.json")
     config = {}
@@ -21,7 +24,10 @@ def set_auto_login_account(napcat_root: str, qq: str):
                 config = json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
-    config["autoLoginAccount"] = qq
+    if qq:
+        config["autoLoginAccount"] = qq
+    else:
+        config.pop("autoLoginAccount", None)
     os.makedirs(os.path.dirname(webui_path), exist_ok=True)
     with open(webui_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)

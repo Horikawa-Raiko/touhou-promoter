@@ -258,7 +258,11 @@ class NapCatManager:
 
         napcat_dir = os.path.dirname(launcher)
 
-        cmd = f'"{launcher}" {qq}' if qq else f'"{launcher}"'
+        # 只通过 webui.json 的 autoLoginAccount 传递账号信息，
+        # 不在命令行上传 qq（等价于 -q 强制快登）。
+        # -q 模式下遇到「当前账号已登录」NapCat 会直接退出进程，
+        # 而仅靠 autoLoginAccount 时 NapCat 快登失败会降级回二维码模式继续运行。
+        cmd = f'"{launcher}"'
 
         try:
             self._process = subprocess.Popen(
@@ -293,34 +297,47 @@ class NapCatManager:
         if self._process:
             try:
                 if os.name == "nt":
-                    # 先尝试优雅终止整个进程树，确保 NapCat 正常卸载 Hook
+                    pid = self._process.pid
                     try:
                         subprocess.run(
-                            f'taskkill /T /PID {self._process.pid}',
-                            shell=True, capture_output=True, timeout=8,
+                            f'taskkill /T /PID {pid}',
+                            shell=True, capture_output=True, timeout=5,
                         )
                     except Exception:
                         pass
                     try:
-                        self._process.wait(timeout=3)
+                        self._process.wait(timeout=2)
                     except subprocess.TimeoutExpired:
-                        # 强制终止残存进程
-                        try:
-                            subprocess.run(
-                                f'taskkill /F /T /PID {self._process.pid}',
-                                shell=True, capture_output=True, timeout=5,
-                            )
-                        except Exception:
-                            pass
-                    # 额外保险：按名称杀 NapCatWinBootMain 和 QQ
-                    for exe in ("NapCatWinBootMain.exe", "QQ.exe"):
-                        try:
-                            subprocess.run(
-                                f"taskkill /F /IM {exe}",
-                                shell=True, capture_output=True, timeout=5,
-                            )
-                        except Exception:
-                            pass
+                        import threading
+                        def force_kill():
+                            try:
+                                subprocess.run(
+                                    f'taskkill /F /T /PID {pid}',
+                                    shell=True, capture_output=True, timeout=5,
+                                )
+                            except Exception:
+                                pass
+                        def kill_exes():
+                            for exe in ("NapCatWinBootMain.exe", "QQ.exe"):
+                                try:
+                                    subprocess.run(
+                                        f"taskkill /F /IM {exe}",
+                                        shell=True, capture_output=True, timeout=5,
+                                    )
+                                except Exception:
+                                    pass
+                        t1 = threading.Thread(target=force_kill)
+                        t2 = threading.Thread(target=kill_exes)
+                        t1.start(); t2.start()
+                        t1.join(timeout=8); t2.join(timeout=8)
+                    # 额外确保 QQ.exe 被杀掉（NapCat 注入的 QQ 可能不在进程树内）
+                    try:
+                        subprocess.run(
+                            'taskkill /F /IM QQ.exe',
+                            shell=True, capture_output=True, timeout=5,
+                        )
+                    except Exception:
+                        pass
                 else:
                     self._process.terminate()
                     try:
