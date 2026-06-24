@@ -149,8 +149,13 @@ class ForwardingEngine:
         success = 0
         failed = 0
 
-        # 首次发送预热：QQ NT 内核连接冷启动时需要额外重试
+        # 首次发送前预热 NT 内核连接（冷启动时第一次 sendMsg 几乎必超时）
         first_send = True
+        if start_index == 0:
+            try:
+                self._client.get_group_list()
+            except Exception:
+                pass  # 预热失败不影响后续重试逻辑
 
         for i in range(start_index, total):
             if self._stop_flag:
