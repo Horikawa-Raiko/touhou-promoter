@@ -5,7 +5,9 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[
+        ('touhou_promoter/assets', 'touhou_promoter/assets'),
+    ],
     hiddenimports=collect_submodules('touhou_promoter') + [
         'websocket',
         'websocket._abnf',
@@ -47,5 +49,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon='touhou_promoter/assets/app_icon.png',
 )
