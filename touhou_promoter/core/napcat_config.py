@@ -211,29 +211,20 @@ def _write_config(config_path: str, config: dict):
 def find_napcat_executable(napcat_root: str) -> Optional[str]:
     """在 napcat 目录下查找可启动文件。
 
-    优先返回 .exe（可直接 Popen 跟踪进程生命周期），
-    .bat 次之（需 shell=True 且 stdout 在 bat 后台化后立即断开）。
+    NapCat 通过 bat 脚本启动（注入 QQ 客户端），不是独立的 exe。
+    返回 launcher-user.bat 路径。
     """
-    # 优先 exe — 直接启动可正确跟踪进程
-    exe_candidates = [
-        os.path.join(napcat_root, "napcat", "NapCatWinBootMain.exe"),
-        os.path.join(napcat_root, "NapCatWinBootMain.exe"),
-        os.path.join(napcat_root, "napcat.exe"),
-        os.path.join(napcat_root, "NapCat.exe"),
-    ]
-    for c in exe_candidates:
-        if os.path.isfile(c):
-            return c
-
-    # 回退 bat
-    bat_candidates = [
+    candidates = [
         os.path.join(napcat_root, "napcat", "launcher-user.bat"),
         os.path.join(napcat_root, "napcat", "launcher.bat"),
         os.path.join(napcat_root, "napcat", "launcher-win10-user.bat"),
         os.path.join(napcat_root, "napcat", "launcher-win10.bat"),
         os.path.join(napcat_root, "napcat.bat"),
+        # 旧版可能的路径
+        os.path.join(napcat_root, "napcat.exe"),
+        os.path.join(napcat_root, "NapCat.exe"),
     ]
-    for c in bat_candidates:
+    for c in candidates:
         if os.path.isfile(c):
             return c
     return None
