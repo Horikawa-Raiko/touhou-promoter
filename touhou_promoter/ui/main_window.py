@@ -230,21 +230,35 @@ class MainWindow(QMainWindow):
     }
 
     /* === 主操作按钮 — 博丽红 === */
-    QPushButton#loginBtn, QPushButton#sendBtn {
+    QPushButton#loginBtn {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
             stop:0 #d42020, stop:1 #b01010);
         border: 1px solid #b01010;
-        border-radius: 6px;
+        border-radius: 5px;
         color: #f0e8e0;
         font-weight: bold;
-        font-size: 13px;
-        padding: 8px 20px;
-        min-height: 28px;
+        font-size: 12px;
+        padding: 6px 14px;
+        min-height: 22px;
     }
-    QPushButton#loginBtn:hover, QPushButton#sendBtn:hover {
+    QPushButton#loginBtn:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
             stop:0 #e83838, stop:1 #d42020);
         border-color: #d42020;
+    }
+    QPushButton#sendBtn {
+        border: 1px solid #d42020;
+        border-radius: 5px;
+        padding: 6px 14px;
+        background: #d42020;
+        color: #f0e8e0;
+        font-weight: bold;
+        font-size: 12px;
+        min-height: 22px;
+    }
+    QPushButton#sendBtn:hover {
+        background: #e83838;
+        border-color: #e83838;
     }
     /* === 登录按钮 — 快登模式（金色） === */
     QPushButton#loginBtn[mode="quick"] {
@@ -587,25 +601,39 @@ class MainWindow(QMainWindow):
     }
 
     /* === 主操作按钮 — 博丽红 === */
-    QPushButton#loginBtn, QPushButton#sendBtn {
+    QPushButton#loginBtn {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
             stop:0 #e62020, stop:1 #c01010);
         border: 1px solid #c01010;
-        border-radius: 6px;
+        border-radius: 5px;
         color: #f0e8e0;
         font-weight: bold;
-        font-size: 13px;
-        padding: 8px 20px;
-        min-height: 28px;
+        font-size: 12px;
+        padding: 6px 14px;
+        min-height: 22px;
     }
-    QPushButton#loginBtn:hover, QPushButton#sendBtn:hover {
+    QPushButton#loginBtn:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
             stop:0 #ff3838, stop:1 #e62020);
         border-color: #e62020;
     }
-    QPushButton#loginBtn:pressed, QPushButton#sendBtn:pressed {
+    QPushButton#loginBtn:pressed {
         background: #b01010;
         border-color: #8b1a1a;
+    }
+    QPushButton#sendBtn {
+        border: 1px solid #e62020;
+        border-radius: 5px;
+        padding: 6px 14px;
+        background: #e62020;
+        color: #f0e8e0;
+        font-weight: bold;
+        font-size: 12px;
+        min-height: 22px;
+    }
+    QPushButton#sendBtn:hover {
+        background: #ff3838;
+        border-color: #ff3838;
     }
     /* === 登录按钮 — 快登模式（金色） === */
     QPushButton#loginBtn[mode="quick"] {
