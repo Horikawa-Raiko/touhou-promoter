@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Optional, Callable
 
 from PyQt6.QtCore import Qt, QTimer, QDateTime, QPoint, QRect, pyqtSignal
-from PyQt6.QtGui import QFont, QPixmap, QMouseEvent
+from PyQt6.QtGui import QPixmap, QMouseEvent
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -51,7 +51,7 @@ def _render_cq_as_html(raw_message: str, self_nick: str = "", self_id: str = "")
                 k, v = part.split("=", 1)
                 params[k.strip()] = v.strip()
         if cq_type == "reply":
-            return '<span style="color:#58a6ff;font-size:11px;border:1px solid #58a6ff;border-radius:4px;padding:0 4px;margin-right:4px">回复</span>'
+            return '<span style="color:#c9a040;font-size:11px;border:1px solid #c9a040;border-radius:4px;padding:0 4px;margin-right:4px">回复</span>'
         if cq_type == "at":
             qq = params.get("qq", "")
             if qq == "all":
@@ -60,7 +60,7 @@ def _render_cq_as_html(raw_message: str, self_nick: str = "", self_id: str = "")
                 label = self_nick or qq
             else:
                 label = qq
-            return f'<span style="color:#58a6ff;font-weight:bold">@{label}</span>'
+            return f'<span style="color:#c9a040;font-weight:bold">@{label}</span>'
         if cq_type == "image":
             file_path = params.get("file", "")
             url = params.get("url", "")
@@ -83,9 +83,9 @@ def _render_cq_as_html(raw_message: str, self_nick: str = "", self_id: str = "")
                     f'<img src="{_escape_html(url)}" '
                     f'style="max-width:180px;border-radius:8px;margin:4px 0">'
                 )
-            return '<span style="color:#8b949e">[图片]</span>'
+            return '<span style="color:#7a6a5a">[图片]</span>'
         if cq_type == "face":
-            return f'<span style="color:#d29922">[表情{params.get("id","")}]</span>'
+            return f'<span style="color:#c9a040">[表情{params.get("id","")}]</span>'
         return _escape_html(m.group(0))
 
     html = re.sub(r"\[CQ:(\w+),([^\]]+)\]", replace_cq, _escape_html(raw_message))
@@ -143,10 +143,6 @@ class ListenerPanel(QWidget):
         hl = QHBoxLayout(header)
         hl.setContentsMargins(10, 4, 8, 4)
         title = QLabel("消息监听")
-        title_font = QFont()
-        title_font.setPointSize(10)
-        title_font.setBold(True)
-        title.setFont(title_font)
         title.setObjectName("lp_title")
         hl.addWidget(title)
         hl.addStretch()
@@ -375,10 +371,10 @@ class ListenerPanel(QWidget):
         dt = QDateTime.fromSecsSinceEpoch(int(msg.timestamp))
         time_str = dt.toString("HH:mm:ss")
 
-        bubble_bg = "#1e4a6e" if self._dark else "#c6e2ff"
-        text_color = "#e6edf3" if self._dark else "#1f2328"
-        meta_color = "#8b949e" if self._dark else "#656d76"
-        avatar_bg = "#4a90d9" if self._dark else "#58a6ff"
+        bubble_bg = "#241614" if self._dark else "#ffffff"
+        text_color = "#f0e8e0" if self._dark else "#2a1810"
+        meta_color = "#7a6a5a" if self._dark else "#9a8070"
+        avatar_bg = "#e62020" if self._dark else "#d42020"
 
         html = _render_cq_as_html(msg.raw_message, self._self_nick, self._self_id)
         name = msg.group_name or msg.group_id
@@ -413,8 +409,10 @@ class ListenerPanel(QWidget):
 
         # 发送者 · 群名
         header = QLabel(
+            f'<span style="color:#c9a040;font-size:11px">'
+            f'{_escape_html(msg.sender_nick)}</span>'
             f'<span style="color:{meta_color};font-size:11px">'
-            f'{_escape_html(msg.sender_nick)} · {_escape_html(name)}'
+            f' · {_escape_html(name)}'
             f'</span>'
         )
         header.setTextFormat(Qt.TextFormat.RichText)
@@ -443,8 +441,9 @@ class ListenerPanel(QWidget):
         outer.addWidget(content)
         outer.addStretch()
 
-        # 保存气泡 label 引用用于高亮
+        # 保存气泡 label 引用和主题色用于高亮
         w._bubble_label = bubble
+        w._bubble_bg = bubble_bg
 
         # 绑定点击事件
         w.mousePressEvent = lambda e, i=idx: self._on_bubble_mouse_press(e, i)
@@ -457,10 +456,10 @@ class ListenerPanel(QWidget):
         dt = QDateTime.fromSecsSinceEpoch(int(msg.timestamp))
         time_str = dt.toString("HH:mm:ss")
 
-        bubble_bg = "#1e6e4a" if self._dark else "#b8f0c8"
-        text_color = "#e6edf3" if self._dark else "#1f2328"
-        meta_color = "#8b949e" if self._dark else "#656d76"
-        avatar_bg = "#2ea043" if self._dark else "#3fb950"
+        bubble_bg = "#3a1018" if self._dark else "#f8e8e8"
+        text_color = "#f0e8e0" if self._dark else "#2a1810"
+        meta_color = "#7a6a5a" if self._dark else "#9a8070"
+        avatar_bg = "#5a9a5a" if self._dark else "#4a8040"
 
         name = msg.group_name or msg.group_id
         text = _escape_html(msg.raw_message).replace("\n", "<br>")
@@ -481,8 +480,10 @@ class ListenerPanel(QWidget):
 
         # 发送者 · 群名
         header = QLabel(
+            f'<span style="color:#c9a040;font-size:11px">'
+            f'我</span>'
             f'<span style="color:{meta_color};font-size:11px">'
-            f'我 · {_escape_html(name)}'
+            f' · {_escape_html(name)}'
             f'</span>'
         )
         header.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -521,6 +522,10 @@ class ListenerPanel(QWidget):
             f"font-weight:bold;font-size:15px"
         )
         outer.addWidget(avatar, 0, Qt.AlignmentFlag.AlignTop)
+
+        # 保存气泡引用用于高亮恢复
+        w._bubble_label = bubble
+        w._bubble_bg = bubble_bg
 
         return w
 
@@ -674,10 +679,9 @@ class ListenerPanel(QWidget):
                 return
 
     def _highlight_bubble(self, idx: int):
-        """给指定索引的气泡加蓝色边框高亮"""
-        highlight_bg = "#1a4a7a" if self._dark else "#c6e2ff"
-        highlight_border = "#58a6ff"
-        normal_bg = "#1e4a6e" if self._dark else "#c6e2ff"
+        """给指定索引的气泡加红色边框高亮"""
+        highlight_bg = "#3a1018" if self._dark else "#f8e8e8"
+        highlight_border = "#e62020"
         for i, w in self._msg_widgets.items():
             bubble_label = getattr(w, '_bubble_label', None)
             if not bubble_label:
@@ -688,6 +692,7 @@ class ListenerPanel(QWidget):
                     f"border-radius:10px;padding:6px 10px"
                 )
             else:
+                normal_bg = getattr(w, '_bubble_bg', "#241614")
                 bubble_label.setStyleSheet(
                     f"background:{normal_bg};border:2px solid transparent;"
                     f"border-radius:10px;padding:6px 10px"
@@ -762,9 +767,9 @@ class ListenerPanel(QWidget):
 
     def _apply_preview_style(self):
         """直接给悬浮预览设置样式（不受父组件 QSS 继承影响）"""
-        bg = "#0d1117" if self._dark else "#ffffff"
-        border = "#30363d" if self._dark else "#d0d7de"
-        text_color = "#e6edf3" if self._dark else "#1f2328"
+        bg = "#241614" if self._dark else "#ffffff"
+        border = "#4a3030" if self._dark else "#d4c8b8"
+        text_color = "#f0e8e0" if self._dark else "#2a1810"
         self._fulltext_preview.setStyleSheet(
             f"background: {bg}; color: {text_color};"
             f"border: 1px solid {border}; border-radius: 6px;"
@@ -772,16 +777,17 @@ class ListenerPanel(QWidget):
         )
 
     def _apply_theme(self):
-        bg = "#0d1117" if self._dark else "#ffffff"
-        header_bg = "#161b22" if self._dark else "#f6f8fa"
-        border = "#30363d" if self._dark else "#d0d7de"
-        text_color = "#e6edf3" if self._dark else "#1f2328"
-        meta_color = "#8b949e" if self._dark else "#656d76"
-        quote_bg = "rgba(88, 166, 255, 0.12)" if self._dark else "rgba(88, 166, 255, 0.15)"
-        at_bg = "rgba(249, 117, 131, 0.12)" if self._dark else "rgba(249, 117, 131, 0.15)"
-        cancel_hover = "#3a3a3a" if self._dark else "#d0d0d0"
-        cancel_color = "#999999" if self._dark else "#666666"
-        cancel_hover_color = "#ffffff" if self._dark else "#000000"
+        bg = "#120808" if self._dark else "#e8ddd5"
+        header_bg = "#241614" if self._dark else "#ffffff"
+        border = "#4a3030" if self._dark else "#d4c8b8"
+        text_color = "#f0e8e0" if self._dark else "#2a1810"
+        title_color = "#c9a040" if self._dark else "#8a7020"
+        meta_color = "#7a6a5a" if self._dark else "#9a8070"
+        quote_bg = "rgba(201, 160, 64, 0.12)" if self._dark else "rgba(138, 112, 32, 0.12)"
+        at_bg = "rgba(230, 32, 32, 0.12)" if self._dark else "rgba(212, 32, 32, 0.12)"
+        cancel_hover = "#3a2020" if self._dark else "#d4c8b8"
+        cancel_color = "#7a6a5a" if self._dark else "#8a7a6a"
+        cancel_hover_color = "#f0e8e0" if self._dark else "#2a1810"
 
         self.setStyleSheet(f"""
             QWidget#lp_header {{
@@ -789,8 +795,10 @@ class ListenerPanel(QWidget):
                 border-bottom: 1px solid {border};
             }}
             QLabel#lp_title {{
-                color: {text_color};
+                color: {title_color};
                 background: transparent;
+                font-weight: bold;
+                font-size: 10pt;
             }}
             QLabel#lp_count {{
                 color: {meta_color};
@@ -814,7 +822,7 @@ class ListenerPanel(QWidget):
                 border-bottom: 1px solid {border};
             }}
             QLabel#lp_quote_icon {{
-                color: #58a6ff;
+                color: #c9a040;
                 font-size: 14px;
                 background: transparent;
             }}
@@ -824,7 +832,7 @@ class ListenerPanel(QWidget):
                 background: transparent;
             }}
             QLabel#lp_at_icon {{
-                color: #f97583;
+                color: #e62020;
                 font-size: 14px;
                 font-weight: bold;
                 background: transparent;
@@ -855,6 +863,10 @@ class ListenerPanel(QWidget):
                 padding: 4px 8px;
                 background: {bg};
                 color: {text_color};
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border-color: #c04040;
             }}
             QComboBox {{
                 border: 1px solid {border};
@@ -874,7 +886,7 @@ class ListenerPanel(QWidget):
                 color: {text_color};
             }}
             QPushButton:hover {{
-                background: {"#21262d" if self._dark else "#e1e4e8"};
+                background: {"#3a2020" if self._dark else "#d4c8b8"};
             }}
             QTextEdit#lp_fulltext_preview {{
                 background: {bg};
