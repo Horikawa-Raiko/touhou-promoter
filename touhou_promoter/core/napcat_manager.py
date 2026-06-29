@@ -264,7 +264,12 @@ class NapCatManager:
         # 不在命令行上传 qq（等价于 -q 强制快登）。
         # -q 模式下遇到「当前账号已登录」NapCat 会直接退出进程，
         # 而仅靠 autoLoginAccount 时 NapCat 快登失败会降级回二维码模式继续运行。
-        cmd = f'"{launcher}"'
+
+        is_bat = launcher.lower().endswith(".bat")
+        if is_bat:
+            cmd = f'"{launcher}"'
+        else:
+            cmd = [launcher]
 
         try:
             self._process = subprocess.Popen(
@@ -276,7 +281,7 @@ class NapCatManager:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                shell=True,
+                shell=is_bat,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
         except Exception as e:
