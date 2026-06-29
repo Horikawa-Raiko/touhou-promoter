@@ -3,30 +3,22 @@
 实现"点按钮即出二维码"：
 1. 检查 %APPDATA%/touhou-promoter/napcat/ 是否已有 NapCat
 2. 搜索常见安装位置
-3. 都没有则自动从 GitHub 下载（多源竞速获取API，下载顺序回退）
+3. 都没有则自动从 GitHub 下载（支持 ghproxy 镜像加速）
 4. 下载完成后自动解压并配置
 """
 
 import os
 import zipfile
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
 from touhou_promoter.core.napcat_config import find_napcat_executable
 
 NAPCAT_RELEASE_API = "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
-
-# GitHub 下载加速源 — API 查询用竞速，文件下载用顺序回退
-# 直连放最后兜底，前面的镜像按可用性排列
-_GITHUB_MIRRORS = [
-    "https://gh-proxy.com/",
-    "https://ghproxy.net/",
-    "",                            # 直连
-]
-
+GHPROXY_PREFIX = "https://ghproxy.com/"
 DEFAULT_NUM_WORKERS = 4
 
 
@@ -55,41 +47,13 @@ def find_napcat_on_system() -> Optional[str]:
 
 # ---------- 下载 ----------
 
-def _fetch_api_json(api_url: str, timeout: float) -> dict | None:
-    """尝试从一个 URL 获取 JSON，失败返回 None"""
-    try:
-        resp = requests.get(api_url, timeout=timeout)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception:
-        return None
-
-
 def _get_download_urls() -> list[tuple[str, str]]:
-    """获取最新 NapCat 下载链接（API 竞速：多镜像+直连谁快用谁）。
-
-    返回 [(文件名, URL), ...]
-    """
-    # 构建 API URL 列表
-    api_urls = []
-    for proxy in _GITHUB_MIRRORS:
-        if proxy:
-            api_urls.append(proxy.rstrip("/") + "/" + NAPCAT_RELEASE_API)
-        else:
-            api_urls.append(NAPCAT_RELEASE_API)
-
-    data = None
-    with ThreadPoolExecutor(max_workers=len(api_urls)) as pool:
-        futures = {pool.submit(_fetch_api_json, u, 8): u for u in api_urls}
-        for f in as_completed(futures):
-            result = f.result()
-            if result is not None:
-                data = result
-                for rf in futures:
-                    rf.cancel()
-                break
-
-    if data is None:
+    """获取最新 NapCat 下载链接。返回 [(文件名, URL), ...]"""
+    try:
+        resp = requests.get(NAPCAT_RELEASE_API, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
         return _fallback_urls()
 
     assets = []
@@ -98,6 +62,7 @@ def _get_download_urls() -> list[tuple[str, str]]:
         url = a.get("browser_download_url", "")
         if not name or not url:
             continue
+        # 只下载 Framework + Windows Shell
         if "Framework" in name or ("Shell" in name and "Windows" in name):
             assets.append((name, url))
 
@@ -113,61 +78,29 @@ def _fallback_urls() -> list[tuple[str, str]]:
     ]
 
 
-def _build_mirror_urls(github_url: str) -> list[str]:
-    """为一个 GitHub 直链生成 [镜像URL, ..., 直链URL] 列表"""
-    urls = []
-    for proxy in _GITHUB_MIRRORS:
-        urls.append((proxy.rstrip("/") + "/" + github_url) if proxy else github_url)
-    return urls
-
-
 def download_with_progress(url: str, dest: str, progress_cb=None) -> bool:
-    """下载文件（顺序回退：镜像 → 直连）。
-
-    每个候选 URL 写入独立临时文件，成功后 rename 到 dest，
-    避免多源同时写同一文件导致损坏。
-    """
-    candidates = _build_mirror_urls(url)
-    last_error = None
-
-    for i, download_url in enumerate(candidates):
+    """下载文件，可选进度回调 progress_cb(bytes_done, total_bytes)"""
+    for attempt in range(3):
+        download_url = url
+        # 第一次尝试直连，后续尝试走镜像
+        if attempt > 0:
+            download_url = GHPROXY_PREFIX + url
         try:
-            # 每个候选写独立临时文件
-            tmp_fd, tmp_path = tempfile.mkstemp(prefix="napcat_dl_", suffix=".zip")
-            os.close(tmp_fd)
-            try:
-                resp = requests.get(download_url, stream=True, timeout=120)
-                resp.raise_for_status()
-                total = int(resp.headers.get("content-length", 0))
-                done = 0
-                with open(tmp_path, "wb") as f:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        done += len(chunk)
-                        if progress_cb:
-                            progress_cb(done, total)
-                # 完整写入后 rename
-                if os.path.exists(dest):
-                    os.remove(dest)
-                os.rename(tmp_path, dest)
-                return True
-            except Exception:
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
-                raise
-        except Exception as e:
-            last_error = e
-            continue
-
-    if last_error:
-        try:
-            # 给调用者一个可读的提示
-            if hasattr(last_error, "response") and last_error.response is not None:
-                pass  # HTTPError 自带状态码信息
+            resp = requests.get(download_url, stream=True, timeout=30)
+            resp.raise_for_status()
+            total = int(resp.headers.get("content-length", 0))
+            done = 0
+            with open(dest, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    done += len(chunk)
+                    if progress_cb:
+                        progress_cb(done, total)
+            return True
         except Exception:
-            pass
+            if attempt == 2:
+                return False
+            continue
     return False
 
 
@@ -216,13 +149,8 @@ def install_napcat(target_dir: str, progress_cb=None, status_cb=None) -> bool:
             with zipfile.ZipFile(dest, "r") as zf:
                 zf.extractall(target_dir)
         except zipfile.BadZipFile:
-            # 损坏文件清理掉，下次重试可以重新下载
-            try:
-                os.remove(dest)
-            except OSError:
-                pass
             if status_cb:
-                status_cb(f"{filename} 文件损坏，请重试")
+                status_cb(f"{filename} 文件损坏，正在重试...")
             return False
 
     # 清理临时文件
@@ -233,7 +161,7 @@ def install_napcat(target_dir: str, progress_cb=None, status_cb=None) -> bool:
         pass
 
     if status_cb:
-        status_cb("NapCat 下载解压完成")
+        status_cb("NapCat 安装完成")
 
     return True
 
@@ -281,9 +209,5 @@ def ensure_napcat_ready(
         exe = find_napcat_executable(cached)
         if exe:
             return cached
-        else:
-            if status_cb:
-                status_cb("NapCat 已下载但未找到可执行文件，目录结构可能已变更")
-            return None
 
     return None
