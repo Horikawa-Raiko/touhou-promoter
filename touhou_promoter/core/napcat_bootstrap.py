@@ -3,22 +3,30 @@
 实现"点按钮即出二维码"：
 1. 检查 %APPDATA%/touhou-promoter/napcat/ 是否已有 NapCat
 2. 搜索常见安装位置
-3. 都没有则自动从 GitHub 下载（支持 ghproxy 镜像加速）
+3. 都没有则自动从 GitHub 下载（直连+多镜像竞速，优先国内可用）
 4. 下载完成后自动解压并配置
 """
 
 import os
 import zipfile
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
-from urllib.parse import urlparse
 
 import requests
 
 from touhou_promoter.core.napcat_config import find_napcat_executable
 
 NAPCAT_RELEASE_API = "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
-GHPROXY_PREFIX = "https://ghproxy.com/"
+
+# 镜像列表 — 按优先级排列，直连兜底
+_GITHUB_PROXIES = [
+    "https://gh-proxy.com/",      # 国内镜像（实测稳定）
+    "https://mirror.ghproxy.com/", # ghproxy 新域名
+    "https://ghproxy.com/",        # ghproxy 旧域名
+    "",                            # 直连（兜底）
+]
+
 DEFAULT_NUM_WORKERS = 4
 
 
@@ -47,13 +55,43 @@ def find_napcat_on_system() -> Optional[str]:
 
 # ---------- 下载 ----------
 
-def _get_download_urls() -> list[tuple[str, str]]:
-    """获取最新 NapCat 下载链接。返回 [(文件名, URL), ...]"""
+def _fetch_api_json(api_url: str, timeout: float) -> dict | None:
+    """尝试从一个 URL 获取 JSON，失败返回 None"""
     try:
-        resp = requests.get(NAPCAT_RELEASE_API, timeout=15)
+        resp = requests.get(api_url, timeout=timeout)
         resp.raise_for_status()
-        data = resp.json()
+        return resp.json()
     except Exception:
+        return None
+
+
+def _get_download_urls() -> list[tuple[str, str]]:
+    """获取最新 NapCat 下载链接（API 竞速：直连+镜像谁快用谁）。
+
+    返回 [(文件名, URL), ...]
+    """
+    # 构建 API URL 列表：镜像优先，直连兜底
+    api_urls = []
+    for proxy in _GITHUB_PROXIES:
+        if proxy:
+            api_urls.append(proxy.rstrip("/") + "/" + NAPCAT_RELEASE_API)
+        else:
+            api_urls.append(NAPCAT_RELEASE_API)
+
+    data = None
+    # 短超时竞速：300ms 内第一个响应的胜出
+    with ThreadPoolExecutor(max_workers=len(api_urls)) as pool:
+        futures = {pool.submit(_fetch_api_json, u, 8): u for u in api_urls}
+        for f in as_completed(futures):
+            result = f.result()
+            if result is not None:
+                data = result
+                # 取消剩余请求（best-effort）
+                for rf in futures:
+                    rf.cancel()
+                break
+
+    if data is None:
         return _fallback_urls()
 
     assets = []
@@ -62,7 +100,6 @@ def _get_download_urls() -> list[tuple[str, str]]:
         url = a.get("browser_download_url", "")
         if not name or not url:
             continue
-        # 只下载 Framework + Windows Shell
         if "Framework" in name or ("Shell" in name and "Windows" in name):
             assets.append((name, url))
 
@@ -78,29 +115,43 @@ def _fallback_urls() -> list[tuple[str, str]]:
     ]
 
 
+def _try_download_one(url: str, dest: str, progress_cb, timeout: float) -> bool:
+    """尝试从单个 URL 下载文件。返回 True/False，不抛异常。"""
+    try:
+        resp = requests.get(url, stream=True, timeout=timeout)
+        resp.raise_for_status()
+        total = int(resp.headers.get("content-length", 0))
+        done = 0
+        with open(dest, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+                done += len(chunk)
+                if progress_cb:
+                    progress_cb(done, total)
+        return True
+    except Exception:
+        return False
+
+
 def download_with_progress(url: str, dest: str, progress_cb=None) -> bool:
-    """下载文件，可选进度回调 progress_cb(bytes_done, total_bytes)"""
-    for attempt in range(3):
-        download_url = url
-        # 第一次尝试直连，后续尝试走镜像
-        if attempt > 0:
-            download_url = GHPROXY_PREFIX + url
-        try:
-            resp = requests.get(download_url, stream=True, timeout=30)
-            resp.raise_for_status()
-            total = int(resp.headers.get("content-length", 0))
-            done = 0
-            with open(dest, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    done += len(chunk)
-                    if progress_cb:
-                        progress_cb(done, total)
-            return True
-        except Exception:
-            if attempt == 2:
-                return False
-            continue
+    """下载文件（直连+多镜像竞速，谁先通谁下载）。
+
+    对每个候选 URL 同时发起请求，第一个成功的胜出，其余取消。
+    这样无论用户有没有开梯子都不用等超时。
+    """
+    # 构建候选 URL 列表
+    candidates = []
+    for proxy in _GITHUB_PROXIES:
+        candidates.append((proxy.rstrip("/") + "/" + url) if proxy else url)
+
+    # 竞速：并发请求，取第一个成功的
+    with ThreadPoolExecutor(max_workers=len(candidates)) as pool:
+        futures = {pool.submit(_try_download_one, u, dest, progress_cb, 120): u for u in candidates}
+        for f in as_completed(futures):
+            if f.result():
+                for rf in futures:
+                    rf.cancel()
+                return True
     return False
 
 
