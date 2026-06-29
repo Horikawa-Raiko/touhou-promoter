@@ -241,6 +241,10 @@ class NapCatManager:
             self._state.napcat_status.emit(f"错误: 在 {self._napcat_root} 中找不到 NapCat 启动脚本")
             return False
 
+        # 确保 loadNapCat.js 存在（新版 NapCat v5+ 引导入口）
+        napcat_dir = os.path.dirname(launcher)
+        _ensure_load_napcat_js(napcat_dir)
+
         # webui.json autoLoginAccount — 快登时设QQ号，扫码时清空
         set_auto_login_account(self._napcat_root, qq)
 
@@ -255,8 +259,6 @@ class NapCatManager:
 
         mode = f"自动登录 (QQ:{qq})" if qq else "扫码登录"
         self._state.napcat_status.emit(f"正在启动 NapCat ({mode})...")
-
-        napcat_dir = os.path.dirname(launcher)
 
         # 只通过 webui.json 的 autoLoginAccount 传递账号信息，
         # 不在命令行上传 qq（等价于 -q 强制快登）。
@@ -414,9 +416,12 @@ class NapCatManager:
         self._monitor_connected = False
         if self._intentional_stop:
             self._intentional_stop = False
-            self._state.napcat_status.emit(f"NapCat 已退出 (code={rc})")
-        elif rc != 0:
-            self._state.napcat_status.emit(f"NapCat 已退出 (code={rc})")
+            self._state.napcat_status.emit(f"NapCat 已停止 (code={rc})")
+        elif rc is not None and rc > 0:
+            # 明确的正数退出码表示进程崩溃
+            self._state.napcat_status.emit(f"NapCat 异常退出 (code={rc})")
             self._state.login_status_changed.emit(False, f"NapCat 异常退出 (code={rc})")
         else:
-            self._state.napcat_status.emit(f"NapCat 已退出 (code={rc})")
+            # rc=0（正常退出）或 rc=None→-1（bat 后台化导致 cmd 先退出，node 可能仍在运行）
+            # 不 emit login_status_changed，让 OneBot HTTP 轮询来判断真实状态
+            self._state.napcat_status.emit("NapCat 启动器已退出，等待 OneBot 就绪...")
