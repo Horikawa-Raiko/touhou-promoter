@@ -39,10 +39,10 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
     """查找 QQ.exe 路径，返回 (路径或None, [调试行列表])。
 
     搜索策略（逐级降级）：
-    0. 用户手动指定的路径（config.json qq_exe_path）
-    1. 精确注册表键 (HKLM + HKCU, "QQ" + "QQNT")
-    2. 遍历 Uninstall 子键，匹配 DisplayName 含 "QQ" 的项
-    3. 搜索常见安装目录（含通配符匹配版本号子目录）
+    0. 用户手动指定的路径
+    1. 精确注册表键 (HKLM+HKCU, QQ+QQNT, Uninstall + App Paths)
+    2. 遍历 Uninstall 子键，匹配 DisplayName
+    3. 扫描常见安装目录
     """
     import winreg
     debug_lines = []
@@ -53,40 +53,74 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
             return True
         return False
 
-    # --- 策略0: 用户手动指定的路径 ---
+    def _regval_to_qq_dir(val: str, val_name: str) -> str:
+        """把注册表值转成 QQ.exe 所在目录。
+        InstallLocation 本身就是目录；
+        DisplayIcon 可能带图标索引后缀如 "...,0"，需 strip；
+        UninstallString 是可执行命令行。
+        """
+        if val_name == "InstallLocation":
+            return val
+        # "C:\path\QQ.exe",0 或 "C:\path\uninst.exe" /X{GUID}
+        clean = val.split(",")[0].strip().strip('"')
+        return os.path.dirname(clean)
+
+    def _try_key_values(key, source_label: str) -> str | None:
+        """尝试从已打开的注册表键中读 InstallLocation/DisplayIcon/UninstallString，
+        拼出 QQ.exe 路径，找到就返回，否则返回 None。"""
+        for val_name in ("InstallLocation", "DisplayIcon", "UninstallString"):
+            try:
+                val, _ = winreg.QueryValueEx(key, val_name)
+                if not val:
+                    continue
+                debug_lines.append(f"  [注册表] {source_label} {val_name}={val}")
+                qq_dir = _regval_to_qq_dir(val, val_name)
+                qq_exe = os.path.join(qq_dir, "QQ.exe")
+                if _check_exe(qq_exe):
+                    return qq_exe
+            except OSError as e:
+                debug_lines.append(f"  [注册表] {source_label} {val_name} 读取失败: {e}")
+        return None
+
+    # --- 策略0: 手动路径 ---
     if saved_path:
         debug_lines.append(f"  [配置] 检查手动指定的路径: {saved_path}")
         if _check_exe(saved_path):
             return saved_path, debug_lines
-        else:
-            debug_lines.append(f"  [配置] 路径已失效，回退到自动搜索")
+        debug_lines.append(f"  [配置] 路径已失效，回退到自动搜索")
 
-    # --- 策略1: 精确注册表键 ---
+    # --- 策略1: 精确注册表键 (Uninstall + App Paths) ---
     for hive, hive_name in (
         (winreg.HKEY_LOCAL_MACHINE, "HKLM"),
         (winreg.HKEY_CURRENT_USER, "HKCU"),
     ):
         for subkey in (
+            # Uninstall 键
             r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
             r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\QQNT",
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\QQNT",
+            # App Paths — 直接指向 QQ.exe
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\QQ.exe",
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\QQ.exe",
         ):
             debug_lines.append(f"  [注册表] 尝试: {hive_name}\\{subkey}")
             try:
                 with winreg.OpenKey(hive, subkey) as key:
-                    for val_name in ("UninstallString", "DisplayIcon", "InstallLocation"):
+                    # App Paths 的默认值就是完整路径
+                    if "App Paths" in subkey:
                         try:
-                            val, _ = winreg.QueryValueEx(key, val_name)
-                            debug_lines.append(f"  [注册表] {val_name}={val}")
-                            qq_dir = val if val_name == "InstallLocation" else os.path.dirname(val)
-                            qq_exe = os.path.join(qq_dir, "QQ.exe")
-                            if _check_exe(qq_exe):
-                                return qq_exe, debug_lines
+                            val, _ = winreg.QueryValueEx(key, "")
+                            debug_lines.append(f"  [注册表] App Paths (默认)={val}")
+                            if _check_exe(val):
+                                return val, debug_lines
                         except OSError:
-                            continue
-            except OSError:
-                debug_lines.append(f"  [注册表] 键不存在")
+                            pass
+                    result = _try_key_values(key, f"{hive_name}\\{subkey}")
+                    if result:
+                        return result, debug_lines
+            except OSError as e:
+                debug_lines.append(f"  [注册表] 键不存在 ({e})")
                 continue
 
     # --- 策略2: 枚举 Uninstall 子键 ---
@@ -108,7 +142,6 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                             i += 1
                         except OSError:
                             break
-                        # 不预过滤子键名 — MSI安装的键名是GUID不包含QQ
                         try:
                             with winreg.OpenKey(base, subkey_name) as sk:
                                 try:
@@ -118,33 +151,24 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                                 if "QQ" not in dn and "qq" not in dn.lower() and "腾讯QQ" not in dn:
                                     continue
                                 debug_lines.append(f"  [注册表] 匹配: {hive_name}\\...\\{subkey_name} -> {dn}")
-                                for val_name in ("UninstallString", "DisplayIcon", "InstallLocation"):
-                                    try:
-                                        val, _ = winreg.QueryValueEx(sk, val_name)
-                                        debug_lines.append(f"  [注册表] {val_name}={val}")
-                                        qq_dir = val if val_name == "InstallLocation" else os.path.dirname(val)
-                                        qq_exe = os.path.join(qq_dir, "QQ.exe")
-                                        if _check_exe(qq_exe):
-                                            return qq_exe, debug_lines
-                                    except OSError:
-                                        continue
-                        except OSError:
-                            continue
+                                result = _try_key_values(sk, f"{hive_name}\\...\\{subkey_name}")
+                                if result:
+                                    return result, debug_lines
+                        except OSError as e:
+                            debug_lines.append(f"  [注册表] 打开子键失败 {subkey_name}: {e}")
+            except OSError as e:
+                debug_lines.append(f"  [注册表] 打开 Uninstall 基键失败 {hive_name}\\{uninstall_base}: {e}")
 
     # --- 策略3: 扫描常见安装目录 ---
     debug_lines.append("  [搜索] 扫描常见安装目录...")
+    search_roots: set[str] = set()
 
-    # 先收集所有候选根目录
-    search_roots = set()
-
-    # 每个驱动器的 Program Files (C: D: E: F: G:)
     for drive in ("C:", "D:", "E:", "F:", "G:"):
         search_roots.update([
             rf"{drive}\Program Files\Tencent",
             rf"{drive}\Program Files (x86)\Tencent",
         ])
 
-    # %LOCALAPPDATA% / %APPDATA% / %USERPROFILE%
     search_roots.update([
         os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tencent"),
         os.path.expandvars(r"%LOCALAPPDATA%\Tencent"),
@@ -154,34 +178,29 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
         os.path.expanduser(r"~\Downloads\Tencent"),
     ])
 
-    # 遍历每个根目录，试 QQNT/QQ/TIM 子目录 + 版本号子目录
     for root in sorted(search_roots):
         if not os.path.isdir(root):
             continue
         for sub in ("QQNT", "QQ", "TIM"):
             candidate = os.path.join(root, sub)
-            # 先试直接的 QQ.exe
             debug_lines.append(f"  [搜索] 尝试: {candidate}")
-            qq_exe = os.path.join(candidate, "QQ.exe")
-            if _check_exe(qq_exe):
-                return qq_exe, debug_lines
-            # QQNT 可能有版本号子目录，如 QQNT\9.9.12\QQ.exe
+            if _check_exe(os.path.join(candidate, "QQ.exe")):
+                return os.path.join(candidate, "QQ.exe"), debug_lines
+            # QQNT 版本号子目录
             if sub == "QQNT":
                 try:
                     for item in sorted(os.listdir(candidate), reverse=True):
-                        ver_dir = os.path.join(candidate, item)
-                        if not os.path.isdir(ver_dir):
-                            continue
-                        qq_exe = os.path.join(ver_dir, "QQ.exe")
-                        if _check_exe(qq_exe):
-                            return qq_exe, debug_lines
+                        if os.path.isdir(os.path.join(candidate, item)):
+                            qq_exe = os.path.join(candidate, item, "QQ.exe")
+                            if _check_exe(qq_exe):
+                                return qq_exe, debug_lines
                 except OSError:
                     continue
-            # TIM 的 QQ.exe 可能在 Bin 子目录下
+            # TIM Bin 子目录
             if sub == "TIM":
                 bin_exe = os.path.join(candidate, "Bin", "QQ.exe")
                 if _check_exe(bin_exe):
-                    return qq_exe, debug_lines
+                    return bin_exe, debug_lines
 
     debug_lines.append("  [搜索] 所有策略均未找到 QQ.exe")
     return None, debug_lines
