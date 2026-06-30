@@ -44,9 +44,11 @@ def _find_qq_exe(saved_path: str = "") -> Optional[str]:
     2. 遍历 Uninstall 子键，匹配 DisplayName
     3. 扫描常见安装目录
     4. 递归搜索 Tencent 目录
+    5. 全盘搜索 QQNT 目录（兜底）
 
     NapCat 只能注入 QQNT（Electron 架构），旧版 Win32 QQ 不兼容，找到也跳过。
     """
+    import ctypes
     import winreg
 
     def _is_qqnt(exe_path: str) -> bool:
@@ -72,6 +74,30 @@ def _find_qq_exe(saved_path: str = "") -> Optional[str]:
         clean = val.split(",")[0].strip().strip('"')
         return os.path.dirname(clean)
 
+    def _find_in_dir(qq_dir: str) -> Optional[str]:
+        """在 qq_dir 及其下一级子目录中查找 QQNT 的 QQ.exe"""
+        if not os.path.isdir(qq_dir):
+            return None
+        qq_exe = os.path.join(qq_dir, "QQ.exe")
+        if _check_exe(qq_exe):
+            result = _accept_exe(qq_exe)
+            if result:
+                return result
+        # QQNT 版本号子目录 (如 QQNT/9.9.18/QQ.exe)
+        if "QQNT" in qq_dir or "qqnt" in qq_dir.lower():
+            try:
+                for item in sorted(os.listdir(qq_dir), reverse=True):
+                    sub = os.path.join(qq_dir, item)
+                    if os.path.isdir(sub):
+                        qq_exe = os.path.join(sub, "QQ.exe")
+                        if _check_exe(qq_exe):
+                            result = _accept_exe(qq_exe)
+                            if result:
+                                return result
+            except OSError:
+                pass
+        return None
+
     def _try_key_values(key, source_label: str) -> Optional[str]:
         for val_name in ("InstallLocation", "DisplayIcon", "UninstallString"):
             try:
@@ -79,21 +105,23 @@ def _find_qq_exe(saved_path: str = "") -> Optional[str]:
                 if not val:
                     continue
                 qq_dir = _regval_to_qq_dir(val, val_name)
-                qq_exe = os.path.join(qq_dir, "QQ.exe")
-                if _check_exe(qq_exe):
-                    result = _accept_exe(qq_exe)
-                    if result:
-                        return result
+                result = _find_in_dir(qq_dir)
+                if result:
+                    return result
             except OSError:
                 pass
         return None
 
     # --- 策略0: 手动路径 ---
     if saved_path:
-        if _check_exe(saved_path):
+        if os.path.isdir(saved_path):
+            result = _find_in_dir(saved_path)
+        elif _check_exe(saved_path):
             result = _accept_exe(saved_path)
-            if result:
-                return result
+        else:
+            result = None
+        if result:
+            return result
 
     # --- 策略1: 精确注册表键 (Uninstall + App Paths) ---
     for hive, hive_name in (
@@ -224,7 +252,102 @@ def _find_qq_exe(saved_path: str = "") -> Optional[str]:
             except OSError:
                 continue
 
+    # --- 策略5: 全盘搜索 QQNT 目录（兜底）---
+    drives = []
+    try:
+        mask = ctypes.windll.kernel32.GetLogicalDrives()
+        for letter in range(26):
+            if mask & (1 << letter):
+                drives.append(f"{chr(65+letter)}:\\")
+    except Exception:
+        drives = ["C:\\", "D:\\", "E:\\"]
+
+    SKIP_DIRS = {
+        "Windows", "WinNT", "System Volume Information", "$Recycle.Bin",
+        "Recovery", "Boot", "node_modules", ".git", "__pycache__",
+    }
+
+    for drive in drives:
+        try:
+            for dirpath, dirnames, filenames in os.walk(drive, topdown=True):
+                # 剪枝：跳过系统/开发目录
+                dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".")]
+                # 深度安全阀：超过 8 层停止该分支
+                depth = dirpath[len(drive):].count(os.sep)
+                if depth > 6:
+                    dirnames.clear()
+                    continue
+                if "QQ.exe" in filenames:
+                    qq_exe = os.path.join(dirpath, "QQ.exe")
+                    result = _accept_exe(qq_exe)
+                    if result:
+                        return result
+        except OSError:
+            continue
+
     return None
+
+
+# QQNT 版本兼容范围 (来自 NapCat 官方)
+_QQNT_MIN_BUILD = 40768       # 最低可用版本
+_QQNT_RECOMMENDED = 44343     # 推荐版本 (9.9.26.44343)
+_QQNT_MAX_KNOWN = 45000       # 超过此版本发出警告
+
+
+def _get_qqnt_version(qq_exe: str) -> Optional[dict]:
+    """读取 QQ.exe 的 FileVersion，返回 {display, build} 或 None。
+
+    使用 Windows GetFileVersionInfo API。
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.windll.kernel32
+    version_dll = ctypes.windll.version
+
+    ver_size = version_dll.GetFileVersionInfoSizeW(qq_exe, None)
+    if ver_size == 0:
+        return None
+
+    buf = ctypes.create_string_buffer(ver_size)
+    if not version_dll.GetFileVersionInfoW(qq_exe, 0, ver_size, buf):
+        return None
+
+    # 获取固定版本信息
+    ptr = ctypes.c_void_p()
+    ptr_len = wintypes.UINT(0)
+    if not version_dll.VerQueryValueW(buf, r"\\", ctypes.byref(ptr), ctypes.byref(ptr_len)):
+        return None
+
+    class VS_FIXEDFILEINFO(ctypes.Structure):
+        _fields_ = [
+            ("dwSignature", wintypes.DWORD),
+            ("dwStrucVersion", wintypes.DWORD),
+            ("dwFileVersionMS", wintypes.DWORD),
+            ("dwFileVersionLS", wintypes.DWORD),
+            ("dwProductVersionMS", wintypes.DWORD),
+            ("dwProductVersionLS", wintypes.DWORD),
+            ("dwFileFlagsMask", wintypes.DWORD),
+            ("dwFileFlags", wintypes.DWORD),
+            ("dwFileOS", wintypes.DWORD),
+            ("dwFileType", wintypes.DWORD),
+            ("dwFileSubtype", wintypes.DWORD),
+            ("dwFileDateMS", wintypes.DWORD),
+            ("dwFileDateLS", wintypes.DWORD),
+        ]
+
+    info = ctypes.cast(ptr, ctypes.POINTER(VS_FIXEDFILEINFO)).contents
+    ms = info.dwFileVersionMS
+    ls = info.dwFileVersionLS
+    major = (ms >> 16) & 0xFFFF
+    minor = ms & 0xFFFF
+    patch = (ls >> 16) & 0xFFFF
+    build = ls & 0xFFFF
+
+    return {
+        "display": f"{major}.{minor}.{patch}.{build}",
+        "build": build,
+    }
 
 
 def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None, saved_qq_path: str = "") -> subprocess.Popen:
@@ -243,6 +366,23 @@ def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None, saved
             "未找到 QQNT。NapCat 需要 QQNT（Electron 版 QQ），旧版 Win32 QQ 不支持。\n"
             "如已安装 QQNT 但仍报此错，请在设置中手动指定 QQ.exe 路径。"
         )
+
+    # --- QQNT 版本兼容性检查 ---
+    qqnt_ver = _get_qqnt_version(qq_exe)
+    if qqnt_ver:
+        _log(f"QQNT 版本: {qqnt_ver['display']}")
+        build = qqnt_ver["build"]
+        if build < _QQNT_MIN_BUILD:
+            _log(f"⚠ QQNT 版本过旧 (build {build} < {_QQNT_MIN_BUILD})，NapCat 需要 {_QQNT_RECOMMENDED}+")
+            raise FileNotFoundError(
+                f"QQNT 版本过旧（当前: {qqnt_ver['display']}）。\n"
+                f"NapCat 需要 QQNT build {_QQNT_MIN_BUILD}+（推荐 {_QQNT_RECOMMENDED}）。\n"
+                f"请到 im.qq.com 下载新版 QQNT。"
+            )
+        if build > _QQNT_MAX_KNOWN:
+            _log(f"⚠ QQNT 版本 (build {build}) 可能不受支持，如崩溃请降级到 QQNT 9.9.26.44343")
+    else:
+        _log("无法读取 QQNT 版本号（将继续启动）")
 
     hook_dll = os.path.join(napcat_dir, "NapCatWinBootHook.dll")
     if not os.path.isfile(hook_dll):
