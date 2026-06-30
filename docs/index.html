@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>东方Project一键宣发姬 — QQ群批量群发工具</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;600;700;900&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --red: #C04040;
+    --red-light: #D46060;
+    --red-dark: #A03030;
+    --gold: #D4A843;
+    --gold-light: #E8C56D;
+    --bg-deep: #1A1A2E;
+    --bg-card: #232344;
+    --bg-card-hover: #2A2A52;
+    --text: #E8E0D0;
+    --text-dim: #A09888;
+    --text-white: #FFF8F0;
+  }
+
+  body {
+    font-family: 'Noto Sans SC', sans-serif;
+    background: var(--bg-deep);
+    color: var(--text);
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ── Decorative background ── */
+  body::before {
+    content: '';
+    position: fixed;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background:
+      radial-gradient(ellipse at 20% 20%, rgba(192,64,64,0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 60%, rgba(212,168,67,0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 80%, rgba(192,64,64,0.04) 0%, transparent 40%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 24px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ── Header ── */
+  header {
+    text-align: center;
+    padding: 80px 0 60px;
+  }
+  header .badge {
+    display: inline-block;
+    background: rgba(212,168,67,0.15);
+    border: 1px solid rgba(212,168,67,0.3);
+    color: var(--gold-light);
+    padding: 4px 16px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-bottom: 24px;
+  }
+  .app-icon {
+    font-size: 72px;
+    margin-bottom: 16px;
+    display: block;
+    filter: drop-shadow(0 4px 24px rgba(192,64,64,0.4));
+  }
+  header h1 {
+    font-size: 48px;
+    font-weight: 900;
+    color: var(--text-white);
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+  }
+  header h1 .accent { color: var(--gold); }
+  header .subtitle {
+    font-size: 18px;
+    color: var(--text-dim);
+    max-width: 520px;
+    margin: 0 auto 36px;
+  }
+
+  /* ── Buttons ── */
+  .btn-row { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 14px 36px;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 700;
+    font-family: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--red), var(--red-dark));
+    color: #fff;
+    box-shadow: 0 4px 20px rgba(192,64,64,0.4);
+  }
+  .btn-primary:hover { box-shadow: 0 6px 28px rgba(192,64,64,0.55); }
+  .btn-secondary {
+    background: transparent;
+    color: var(--gold);
+    border: 1.5px solid rgba(212,168,67,0.3);
+  }
+  .btn-secondary:hover {
+    background: rgba(212,168,67,0.08);
+    border-color: rgba(212,168,67,0.5);
+  }
+  .btn-lg { padding: 18px 48px; font-size: 18px; border-radius: 12px; }
+  .btn .icon { font-size: 20px; }
+
+  /* ── Sections ── */
+  section { padding: 80px 0; }
+  .section-title {
+    text-align: center;
+    font-size: 32px;
+    font-weight: 900;
+    color: var(--text-white);
+    margin-bottom: 12px;
+  }
+  .section-sub {
+    text-align: center;
+    color: var(--text-dim);
+    margin-bottom: 48px;
+    font-size: 15px;
+  }
+
+  /* ── Feature Cards ── */
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .feature-card {
+    background: var(--bg-card);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 16px;
+    padding: 36px 28px;
+    text-align: center;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .feature-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(212,168,67,0.2);
+  }
+  .feature-card .icon {
+    font-size: 44px;
+    margin-bottom: 20px;
+    display: block;
+  }
+  .feature-card h3 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--gold);
+    margin-bottom: 10px;
+  }
+  .feature-card p {
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  /* ── Steps ── */
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+  }
+  .step {
+    text-align: center;
+    position: relative;
+  }
+  .step-num {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--red), var(--red-dark));
+    color: #fff;
+    font-size: 22px;
+    font-weight: 900;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 16px;
+    box-shadow: 0 4px 16px rgba(192,64,64,0.35);
+  }
+  .step h4 {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-white);
+    margin-bottom: 6px;
+  }
+  .step p {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  /* step connector */
+  .step::after {
+    content: '';
+    position: absolute;
+    top: 26px; left: calc(50% + 38px);
+    width: calc(100% - 76px);
+    height: 1px;
+    background: linear-gradient(90deg, rgba(212,168,67,0.3), transparent);
+  }
+  .step:last-child::after { display: none; }
+
+  /* ── Download Section ── */
+  .download-section {
+    text-align: center;
+    padding: 60px 0 40px;
+  }
+  .download-section .platform-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 6px 18px;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 24px;
+  }
+  .download-section .version {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-top: 12px;
+  }
+  .requirements {
+    margin-top: 28px;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+  .requirements strong { color: var(--text); }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center;
+    padding: 48px 0;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  footer p { color: var(--text-dim); font-size: 13px; }
+  footer a { color: var(--gold); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  footer .links { display: flex; gap: 24px; justify-content: center; margin-bottom: 12px; }
+
+  /* ── Dividers ── */
+  .divider {
+    text-align: center;
+    color: var(--gold);
+    font-size: 24px;
+    letter-spacing: 12px;
+    padding: 20px 0;
+    opacity: 0.5;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    header { padding: 48px 0 36px; }
+    header h1 { font-size: 32px; }
+    .features { grid-template-columns: 1fr; }
+    .steps { grid-template-columns: 1fr 1fr; }
+    .step::after { display: none; }
+    section { padding: 48px 0; }
+    .btn-lg { padding: 14px 32px; font-size: 16px; }
+  }
+  @media (max-width: 480px) {
+    .steps { grid-template-columns: 1fr; }
+    .btn-row { flex-direction: column; align-items: center; }
+  }
+</style>
+</head>
+<body>
+
+<header class="container">
+  <span class="app-icon">⛩️</span>
+  <span class="badge">Touhou Project</span>
+  <h1>东方Project<span class="accent">一键宣发姬</span></h1>
+  <p class="subtitle">
+    为东方同人创作者打造的 QQ 群批量群发工具<br>
+    扫码即用，一键触达 1800+ 东方群
+  </p>
+  <div class="btn-row">
+    <a href="https://github.com/Horikawa-Raiko/touhou-promoter/releases" class="btn btn-primary btn-lg">
+      <span class="icon">⬇</span> 下载 Windows 版
+    </a>
+    <a href="https://github.com/Horikawa-Raiko/touhou-promoter" class="btn btn-secondary">
+      <span class="icon">⌂</span> GitHub
+    </a>
+  </div>
+</header>
+
+<div class="divider container">◆ ◆ ◆</div>
+
+<section id="features" class="container">
+  <h2 class="section-title">核心功能</h2>
+  <p class="section-sub">专为东方宣发场景设计，简化一切复杂操作</p>
+  <div class="features">
+    <div class="feature-card">
+      <span class="icon">📱</span>
+      <h3>扫码即用</h3>
+      <p>微信扫一扫登录 QQ Bot，全程无需输入密码。支持多账号缓存，再次启动秒登。</p>
+    </div>
+    <div class="feature-card">
+      <span class="icon">⚡</span>
+      <h3>批量群发</h3>
+      <p>内置 1800+ 东方群，按分类筛选目标群。智能限速防风控，支持断点续传和秒级撤回。</p>
+    </div>
+    <div class="feature-card">
+      <span class="icon">👂</span>
+      <h3>智能监听</h3>
+      <p>群发后自动监听 @Bot 消息和关键词回复，QQ 气泡风格面板，一键快速回复咨询。</p>
+    </div>
+  </div>
+</section>
+
+<section id="howto" class="container">
+  <h2 class="section-title">三步开始</h2>
+  <p class="section-sub">从下载到群发，三分钟搞定</p>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <h4>下载安装 QQNT</h4>
+      <p>确保已安装 QQNT<br>（Electron 版 QQ）</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <h4>启动应用</h4>
+      <p>双击 exe，应用自动<br>下载配置 NapCat</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <h4>扫码登录</h4>
+      <p>手机 QQ 扫码<br>Bot 自动上线</p>
+    </div>
+    <div class="step">
+      <div class="step-num">4</div>
+      <h4>选择群 → 发送</h4>
+      <p>勾选目标群，编辑消息<br>点击发送完成宣发</p>
+    </div>
+  </div>
+</section>
+
+<section class="download-section container">
+  <h2 class="section-title">免费下载</h2>
+  <p class="section-sub" style="margin-bottom:28px">单文件绿色版，解压即用</p>
+  <div class="platform-badge">
+    <span>🪟</span> 目前仅支持 Windows
+  </div>
+  <br>
+  <a href="https://github.com/Horikawa-Raiko/touhou-promoter/releases" class="btn btn-primary btn-lg">
+    <span class="icon">⬇</span> 下载最新版
+  </a>
+  <p class="version">v1.0 · ~35MB · 免安装</p>
+  <p class="requirements">
+    <strong>系统要求</strong><br>
+    Windows 10 / 11 64位 · 已安装 QQNT（Electron 版）<br>
+    首次启动需联网下载 NapCat（约 30MB）
+  </p>
+</section>
+
+<footer class="container">
+  <div class="links">
+    <a href="https://github.com/Horikawa-Raiko/touhou-promoter">GitHub</a>
+    <a href="https://github.com/Horikawa-Raiko/touhou-promoter/issues">反馈问题</a>
+    <a href="https://github.com/Horikawa-Raiko/touhou-promoter/releases">更新日志</a>
+  </div>
+  <p>Made with ❤️ by 东方同人创作者 · 基于 <a href="https://github.com/NapNeko/NapCatQQ">NapCat</a> OneBot v11</p>
+</footer>
+
+</body>
+</html>
