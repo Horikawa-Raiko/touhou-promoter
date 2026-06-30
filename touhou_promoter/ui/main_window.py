@@ -1591,7 +1591,8 @@ class MainWindow(QMainWindow):
         self._login_retry_count += 1
         if self._login_retry_count < self._login_retry_max:
             if self._login_retry_count <= 5 or self._login_retry_count % 10 == 0:
-                self._append_log(f"[登录] 等待中... ({self._login_retry_count}/{self._login_retry_max})")
+                err_hint = f" ({nickname})" if nickname and not ok else ""
+                self._append_log(f"[登录] 等待中... ({self._login_retry_count}/{self._login_retry_max}){err_hint}")
             interval = 1000 if self._login_retry_count < 10 else 2000
             if self._onebot_mode == "external":
                 QTimer.singleShot(interval, self._do_external_poll_check)

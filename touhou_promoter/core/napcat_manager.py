@@ -58,6 +58,10 @@ def _find_qq_exe(saved_path: str = "") -> Optional[str]:
         for marker in ("misc.bin", "QQNT.dll", "wrapper.node"):
             if os.path.isfile(os.path.join(exe_dir, marker)):
                 return True
+        # 兜底：通过版本号判断（QQNT build >= 40000，旧版 Win32 QQ build 只有几百）
+        ver = _get_qqnt_version(exe_path)
+        if ver and ver["build"] >= 40000:
+            return True
         return False
 
     def _check_exe(path: str) -> bool:
@@ -373,12 +377,7 @@ def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None, saved
         _log(f"QQNT 版本: {qqnt_ver['display']}")
         build = qqnt_ver["build"]
         if build < _QQNT_MIN_BUILD:
-            _log(f"⚠ QQNT 版本过旧 (build {build} < {_QQNT_MIN_BUILD})，NapCat 需要 {_QQNT_RECOMMENDED}+")
-            raise FileNotFoundError(
-                f"QQNT 版本过旧（当前: {qqnt_ver['display']}）。\n"
-                f"NapCat 需要 QQNT build {_QQNT_MIN_BUILD}+（推荐 {_QQNT_RECOMMENDED}）。\n"
-                f"请到 im.qq.com 下载新版 QQNT。"
-            )
+            _log(f"⚠ QQNT 版本过旧 (build {build} < {_QQNT_MIN_BUILD})，NapCat 推荐 {_QQNT_RECOMMENDED}+，部分功能可能异常")
         if build > _QQNT_MAX_KNOWN:
             _log(f"⚠ QQNT 版本 (build {build}) 可能不受支持，如崩溃请降级到 QQNT 9.9.26.44343")
     else:
