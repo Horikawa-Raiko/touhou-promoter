@@ -184,8 +184,14 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
         for sub in ("QQNT", "QQ", "TIM"):
             candidate = os.path.join(root, sub)
             debug_lines.append(f"  [搜索] 尝试: {candidate}")
+            # 直接根目录
             if _check_exe(os.path.join(candidate, "QQ.exe")):
                 return os.path.join(candidate, "QQ.exe"), debug_lines
+            # 常见子目录: Bin、bin、App
+            for subdir in ("Bin", "bin", "app", "App"):
+                sub_exe = os.path.join(candidate, subdir, "QQ.exe")
+                if _check_exe(sub_exe):
+                    return sub_exe, debug_lines
             # QQNT 版本号子目录
             if sub == "QQNT":
                 try:
@@ -196,11 +202,27 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                                 return qq_exe, debug_lines
                 except OSError:
                     continue
-            # TIM Bin 子目录
-            if sub == "TIM":
-                bin_exe = os.path.join(candidate, "Bin", "QQ.exe")
-                if _check_exe(bin_exe):
-                    return bin_exe, debug_lines
+
+    # --- 策略4: 递归搜索 Tencent 目录（深度限制，兜底残缺 MSI 安装）---
+    debug_lines.append("  [搜索] 递归搜索 Tencent 目录...")
+    for drive in ("C:", "D:", "E:"):
+        for prog in ("Program Files", "Program Files (x86)"):
+            tencent_root = os.path.join(f"{drive}\\", prog, "Tencent")
+            if not os.path.isdir(tencent_root):
+                continue
+            try:
+                for dirpath, dirnames, filenames in os.walk(tencent_root):
+                    # 限制深度，避免扫到天荒地老
+                    depth = dirpath[len(tencent_root):].count(os.sep)
+                    if depth > 4:
+                        dirnames.clear()
+                        continue
+                    if "QQ.exe" in filenames:
+                        qq_exe = os.path.join(dirpath, "QQ.exe")
+                        debug_lines.append(f"  [搜索] 递归命中: {qq_exe}")
+                        return qq_exe, debug_lines
+            except OSError:
+                continue
 
     debug_lines.append("  [搜索] 所有策略均未找到 QQ.exe")
     return None, debug_lines
