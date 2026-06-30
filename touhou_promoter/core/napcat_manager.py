@@ -36,29 +36,112 @@ def _ensure_load_napcat_js(napcat_dir: str):
 
 
 def _find_qq_exe() -> tuple:
-    """从注册表查找 QQ.exe 路径，返回 (路径或None, [调试行列表])"""
+    """查找 QQ.exe 路径，返回 (路径或None, [调试行列表])。
+
+    搜索策略（由快到慢）：
+    1. 精确注册表键 (HKLM + HKCU, "QQ" + "QQNT")
+    2. 遍历 Uninstall 子键，匹配 DisplayName 含 "QQ" 的项
+    3. 搜索常见安装目录
+    """
     import winreg
     debug_lines = []
-    for subkey in (
-        r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
-        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
+
+    def _check_exe(path: str) -> bool:
+        if os.path.isfile(path):
+            debug_lines.append(f"  [搜索] QQ.exe 存在: {path}")
+            return True
+        return False
+
+    # --- 策略1: 精确注册表键 ---
+    for hive, hive_name in (
+        (winreg.HKEY_LOCAL_MACHINE, "HKLM"),
+        (winreg.HKEY_CURRENT_USER, "HKCU"),
     ):
-        debug_lines.append(f"  [注册表] 尝试: {subkey}")
-        try:
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, subkey) as key:
-                uninst, _ = winreg.QueryValueEx(key, "UninstallString")
-                debug_lines.append(f"  [注册表] UninstallString={uninst}")
-                qq_dir = os.path.dirname(uninst)
-                qq_exe = os.path.join(qq_dir, "QQ.exe")
-                if os.path.isfile(qq_exe):
-                    debug_lines.append(f"  [注册表] QQ.exe 存在: {qq_exe}")
-                    return qq_exe, debug_lines
-                else:
-                    debug_lines.append(f"  [注册表] QQ.exe 不存在于: {qq_exe}")
-        except OSError:
-            debug_lines.append(f"  [注册表] 键不存在")
-            continue
-    debug_lines.append("  [注册表] 未找到 QQ 安装信息")
+        for subkey in (
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\QQNT",
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\QQNT",
+        ):
+            debug_lines.append(f"  [注册表] 尝试: {hive_name}\\{subkey}")
+            try:
+                with winreg.OpenKey(hive, subkey) as key:
+                    for val_name in ("UninstallString", "DisplayIcon"):
+                        try:
+                            val, _ = winreg.QueryValueEx(key, val_name)
+                            debug_lines.append(f"  [注册表] {val_name}={val}")
+                            qq_dir = os.path.dirname(val)
+                            qq_exe = os.path.join(qq_dir, "QQ.exe")
+                            if _check_exe(qq_exe):
+                                return qq_exe, debug_lines
+                        except OSError:
+                            continue
+            except OSError:
+                debug_lines.append(f"  [注册表] 键不存在")
+                continue
+
+    # --- 策略2: 枚举 Uninstall 子键 ---
+    debug_lines.append("  [注册表] 枚举 Uninstall 子键搜索 QQ...")
+    for hive, hive_name in (
+        (winreg.HKEY_LOCAL_MACHINE, "HKLM"),
+        (winreg.HKEY_CURRENT_USER, "HKCU"),
+    ):
+        for uninstall_base in (
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        ):
+            try:
+                with winreg.OpenKey(hive, uninstall_base) as base:
+                    i = 0
+                    while True:
+                        try:
+                            subkey_name = winreg.EnumKey(base, i)
+                            i += 1
+                        except OSError:
+                            break
+                        if "QQ" not in subkey_name and "Tencent" not in subkey_name and "qq" not in subkey_name.lower():
+                            continue
+                        try:
+                            with winreg.OpenKey(base, subkey_name) as sk:
+                                dn, _ = winreg.QueryValueEx(sk, "DisplayName")
+                        except OSError:
+                            continue
+                        if "QQ" not in dn and "qq" not in dn.lower():
+                            continue
+                        debug_lines.append(f"  [注册表] 匹配: {hive_name}\\...\\{subkey_name} -> {dn}")
+                        for val_name in ("UninstallString", "DisplayIcon"):
+                            try:
+                                val, _ = winreg.QueryValueEx(sk, val_name)
+                                debug_lines.append(f"  [注册表] {val_name}={val}")
+                                qq_dir = os.path.dirname(val)
+                                qq_exe = os.path.join(qq_dir, "QQ.exe")
+                                if _check_exe(qq_exe):
+                                    return qq_exe, debug_lines
+                            except OSError:
+                                continue
+            except OSError:
+                continue
+
+    # --- 策略3: 常见安装目录 ---
+    debug_lines.append("  [搜索] 扫描常见目录...")
+    search_dirs = [
+        os.path.expandvars(r"%ProgramFiles%\Tencent\QQNT"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Tencent\QQNT"),
+        os.path.expandvars(r"%ProgramFiles%\Tencent\QQ"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Tencent\QQ"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tencent\QQNT"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tencent\QQ"),
+        os.path.expandvars(r"%APPDATA%\Tencent\QQNT"),
+        os.path.expanduser(r"~\AppData\Roaming\Tencent\QQNT"),
+        r"D:\Program Files\Tencent\QQNT",
+    ]
+    for d in search_dirs:
+        debug_lines.append(f"  [搜索] 尝试: {d}")
+        qq_exe = os.path.join(d, "QQ.exe")
+        if _check_exe(qq_exe):
+            return qq_exe, debug_lines
+
+    debug_lines.append("  [搜索] 所有策略均未找到 QQ.exe")
     return None, debug_lines
 
 
