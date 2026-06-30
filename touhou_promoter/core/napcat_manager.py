@@ -45,12 +45,11 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
     3. 扫描常见安装目录
     4. 递归搜索 Tencent 目录
 
-    NapCat 只能注入 QQNT（Electron 架构），旧版 Win32 QQ 不兼容。
-    如找到旧版 QQ 会继续搜索 QQNT，只有彻底找不到 QQNT 时才回退旧版。
+    NapCat 只能注入 QQNT（Electron 架构），旧版 Win32 QQ 不兼容，找到也跳过。
     """
     import winreg
     debug_lines = []
-    _legacy_fallback: str | None = None  # 旧版 QQ 回退路径
+    _legacy_found: list[str] = []  # 记录搜索中遇到的旧版QQ路径，仅用于诊断
 
     def _is_qqnt(exe_path: str) -> bool:
         """判断路径是否属于 QQNT（非旧版 Win32 QQ）"""
@@ -71,14 +70,13 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
         return False
 
     def _accept_exe(path: str) -> str | None:
-        """接受一个找到的 QQ.exe。QQNT 立即返回；旧版存为回退，返回 None 继续搜。"""
-        nonlocal _legacy_fallback
+        """接受一个找到的 QQ.exe。QQNT 立即返回；旧版记录并跳过。"""
+        nonlocal _legacy_found
         if _is_qqnt(path):
             debug_lines.append(f"  [搜索] 确认为 QQNT 版本，接受")
             return path
-        debug_lines.append(f"  [搜索] 疑似旧版 QQ（非QQNT），暂存回退，继续搜索 QQNT...")
-        if _legacy_fallback is None:
-            _legacy_fallback = path
+        debug_lines.append(f"  [搜索] 疑似旧版 QQ（非QQNT），跳过（NapCat 不支持旧版 QQ）")
+        _legacy_found.append(path)
         return None
 
     def _regval_to_qq_dir(val: str, val_name: str) -> str:
@@ -266,11 +264,10 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
             except OSError:
                 continue
 
-    debug_lines.append("  [搜索] 所有策略均未找到 QQ.exe")
-    if _legacy_fallback:
-        debug_lines.append(f"  [搜索] ⚠ 未找到 QQNT，回退到旧版 QQ: {_legacy_fallback}")
-        debug_lines.append(f"  [搜索] ⚠ NapCat 只能注入 QQNT，旧版 QQ 可能无法扫码登录")
-        return _legacy_fallback, debug_lines
+    debug_lines.append("  [搜索] 所有策略均未找到 QQNT")
+    if _legacy_found:
+        debug_lines.append(f"  [搜索] ⚠ 找到旧版 QQ（不支持）: {', '.join(_legacy_found)}")
+        debug_lines.append(f"  [搜索] ⚠ 请安装 QQNT（Electron 版 QQ），旧版 Win32 QQ 无法被 NapCat 注入")
     return None, debug_lines
 
 
@@ -292,7 +289,8 @@ def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None, saved
 
     if not qq_exe:
         raise FileNotFoundError(
-            "未找到 QQ.exe，请确认 QQ 已安装（注册表无安装记录）"
+            "未找到 QQNT。NapCat 需要 QQNT（Electron 版 QQ），旧版 Win32 QQ 不支持。\n"
+            "如已安装 QQNT 但仍报此错，请在设置中手动指定 QQ.exe 路径。"
         )
 
     hook_dll = os.path.join(napcat_dir, "NapCatWinBootHook.dll")
