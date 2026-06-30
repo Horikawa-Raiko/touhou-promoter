@@ -43,15 +43,43 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
     1. 精确注册表键 (HKLM+HKCU, QQ+QQNT, Uninstall + App Paths)
     2. 遍历 Uninstall 子键，匹配 DisplayName
     3. 扫描常见安装目录
+    4. 递归搜索 Tencent 目录
+
+    NapCat 只能注入 QQNT（Electron 架构），旧版 Win32 QQ 不兼容。
+    如找到旧版 QQ 会继续搜索 QQNT，只有彻底找不到 QQNT 时才回退旧版。
     """
     import winreg
     debug_lines = []
+    _legacy_fallback: str | None = None  # 旧版 QQ 回退路径
+
+    def _is_qqnt(exe_path: str) -> bool:
+        """判断路径是否属于 QQNT（非旧版 Win32 QQ）"""
+        # QQNT 路径特征: 含 "QQNT" 目录名，或安装目录下有 QQNT 特征文件
+        if "QQNT" in exe_path or "qqnt" in exe_path.lower():
+            return True
+        # 进一步检查: QQNT 的 QQ.exe 旁边通常有 QQNT.dll 或 napcat 相关文件
+        exe_dir = os.path.dirname(exe_path)
+        for marker in ("misc.bin", "QQNT.dll", "wrapper.node"):
+            if os.path.isfile(os.path.join(exe_dir, marker)):
+                return True
+        return False
 
     def _check_exe(path: str) -> bool:
         if os.path.isfile(path):
             debug_lines.append(f"  [搜索] QQ.exe 存在: {path}")
             return True
         return False
+
+    def _accept_exe(path: str) -> str | None:
+        """接受一个找到的 QQ.exe。QQNT 立即返回；旧版存为回退，返回 None 继续搜。"""
+        nonlocal _legacy_fallback
+        if _is_qqnt(path):
+            debug_lines.append(f"  [搜索] 确认为 QQNT 版本，接受")
+            return path
+        debug_lines.append(f"  [搜索] 疑似旧版 QQ（非QQNT），暂存回退，继续搜索 QQNT...")
+        if _legacy_fallback is None:
+            _legacy_fallback = path
+        return None
 
     def _regval_to_qq_dir(val: str, val_name: str) -> str:
         """把注册表值转成 QQ.exe 所在目录。
@@ -77,7 +105,9 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                 qq_dir = _regval_to_qq_dir(val, val_name)
                 qq_exe = os.path.join(qq_dir, "QQ.exe")
                 if _check_exe(qq_exe):
-                    return qq_exe
+                    result = _accept_exe(qq_exe)
+                    if result:
+                        return result
             except OSError as e:
                 debug_lines.append(f"  [注册表] {source_label} {val_name} 读取失败: {e}")
         return None
@@ -86,7 +116,9 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
     if saved_path:
         debug_lines.append(f"  [配置] 检查手动指定的路径: {saved_path}")
         if _check_exe(saved_path):
-            return saved_path, debug_lines
+            result = _accept_exe(saved_path)
+            if result:
+                return result, debug_lines
         debug_lines.append(f"  [配置] 路径已失效，回退到自动搜索")
 
     # --- 策略1: 精确注册表键 (Uninstall + App Paths) ---
@@ -113,7 +145,9 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                             val, _ = winreg.QueryValueEx(key, "")
                             debug_lines.append(f"  [注册表] App Paths (默认)={val}")
                             if _check_exe(val):
-                                return val, debug_lines
+                                result = _accept_exe(val)
+                                if result:
+                                    return result, debug_lines
                         except OSError:
                             pass
                     result = _try_key_values(key, f"{hive_name}\\{subkey}")
@@ -186,12 +220,16 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
             debug_lines.append(f"  [搜索] 尝试: {candidate}")
             # 直接根目录
             if _check_exe(os.path.join(candidate, "QQ.exe")):
-                return os.path.join(candidate, "QQ.exe"), debug_lines
+                result = _accept_exe(os.path.join(candidate, "QQ.exe"))
+                if result:
+                    return result, debug_lines
             # 常见子目录: Bin、bin、App
             for subdir in ("Bin", "bin", "app", "App"):
                 sub_exe = os.path.join(candidate, subdir, "QQ.exe")
                 if _check_exe(sub_exe):
-                    return sub_exe, debug_lines
+                    result = _accept_exe(sub_exe)
+                    if result:
+                        return result, debug_lines
             # QQNT 版本号子目录
             if sub == "QQNT":
                 try:
@@ -199,7 +237,9 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                         if os.path.isdir(os.path.join(candidate, item)):
                             qq_exe = os.path.join(candidate, item, "QQ.exe")
                             if _check_exe(qq_exe):
-                                return qq_exe, debug_lines
+                                result = _accept_exe(qq_exe)
+                                if result:
+                                    return result, debug_lines
                 except OSError:
                     continue
 
@@ -220,11 +260,17 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                     if "QQ.exe" in filenames:
                         qq_exe = os.path.join(dirpath, "QQ.exe")
                         debug_lines.append(f"  [搜索] 递归命中: {qq_exe}")
-                        return qq_exe, debug_lines
+                        result = _accept_exe(qq_exe)
+                        if result:
+                            return result, debug_lines
             except OSError:
                 continue
 
     debug_lines.append("  [搜索] 所有策略均未找到 QQ.exe")
+    if _legacy_fallback:
+        debug_lines.append(f"  [搜索] ⚠ 未找到 QQNT，回退到旧版 QQ: {_legacy_fallback}")
+        debug_lines.append(f"  [搜索] ⚠ NapCat 只能注入 QQNT，旧版 QQ 可能无法扫码登录")
+        return _legacy_fallback, debug_lines
     return None, debug_lines
 
 
