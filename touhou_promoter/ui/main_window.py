@@ -1321,11 +1321,6 @@ class MainWindow(QMainWindow):
         if not clean.strip():
             return
 
-        # 调试/诊断行直接放行，不经过压制和格式过滤
-        if clean.startswith("[调试") or clean.startswith("[搜索]") or clean.startswith("[注册表]") or clean.startswith("[配置]"):
-            self._append_log(f"[NapCat] {clean}")
-            return
-
         for pattern in self._NAPCAT_LOG_SUPPRESS:
             if re.search(pattern, clean, re.IGNORECASE):
                 return

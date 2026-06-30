@@ -35,8 +35,8 @@ def _ensure_load_napcat_js(napcat_dir: str):
             pass
 
 
-def _find_qq_exe(saved_path: str = "") -> tuple:
-    """查找 QQ.exe 路径，返回 (路径或None, [调试行列表])。
+def _find_qq_exe(saved_path: str = "") -> Optional[str]:
+    """查找 QQNT 的 QQ.exe 路径，找不到返回 None。
 
     搜索策略（逐级降级）：
     0. 用户手动指定的路径
@@ -48,15 +48,10 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
     NapCat 只能注入 QQNT（Electron 架构），旧版 Win32 QQ 不兼容，找到也跳过。
     """
     import winreg
-    debug_lines = []
-    _legacy_found: list[str] = []  # 记录搜索中遇到的旧版QQ路径，仅用于诊断
 
     def _is_qqnt(exe_path: str) -> bool:
-        """判断路径是否属于 QQNT（非旧版 Win32 QQ）"""
-        # QQNT 路径特征: 含 "QQNT" 目录名，或安装目录下有 QQNT 特征文件
         if "QQNT" in exe_path or "qqnt" in exe_path.lower():
             return True
-        # 进一步检查: QQNT 的 QQ.exe 旁边通常有 QQNT.dll 或 napcat 相关文件
         exe_dir = os.path.dirname(exe_path)
         for marker in ("misc.bin", "QQNT.dll", "wrapper.node"):
             if os.path.isfile(os.path.join(exe_dir, marker)):
@@ -64,60 +59,41 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
         return False
 
     def _check_exe(path: str) -> bool:
-        if os.path.isfile(path):
-            debug_lines.append(f"  [搜索] QQ.exe 存在: {path}")
-            return True
-        return False
+        return os.path.isfile(path)
 
-    def _accept_exe(path: str) -> str | None:
-        """接受一个找到的 QQ.exe。QQNT 立即返回；旧版记录并跳过。"""
-        nonlocal _legacy_found
+    def _accept_exe(path: str) -> Optional[str]:
         if _is_qqnt(path):
-            debug_lines.append(f"  [搜索] 确认为 QQNT 版本，接受")
             return path
-        debug_lines.append(f"  [搜索] 疑似旧版 QQ（非QQNT），跳过（NapCat 不支持旧版 QQ）")
-        _legacy_found.append(path)
         return None
 
     def _regval_to_qq_dir(val: str, val_name: str) -> str:
-        """把注册表值转成 QQ.exe 所在目录。
-        InstallLocation 本身就是目录；
-        DisplayIcon 可能带图标索引后缀如 "...,0"，需 strip；
-        UninstallString 是可执行命令行。
-        """
         if val_name == "InstallLocation":
             return val
-        # "C:\path\QQ.exe",0 或 "C:\path\uninst.exe" /X{GUID}
         clean = val.split(",")[0].strip().strip('"')
         return os.path.dirname(clean)
 
-    def _try_key_values(key, source_label: str) -> str | None:
-        """尝试从已打开的注册表键中读 InstallLocation/DisplayIcon/UninstallString，
-        拼出 QQ.exe 路径，找到就返回，否则返回 None。"""
+    def _try_key_values(key, source_label: str) -> Optional[str]:
         for val_name in ("InstallLocation", "DisplayIcon", "UninstallString"):
             try:
                 val, _ = winreg.QueryValueEx(key, val_name)
                 if not val:
                     continue
-                debug_lines.append(f"  [注册表] {source_label} {val_name}={val}")
                 qq_dir = _regval_to_qq_dir(val, val_name)
                 qq_exe = os.path.join(qq_dir, "QQ.exe")
                 if _check_exe(qq_exe):
                     result = _accept_exe(qq_exe)
                     if result:
                         return result
-            except OSError as e:
-                debug_lines.append(f"  [注册表] {source_label} {val_name} 读取失败: {e}")
+            except OSError:
+                pass
         return None
 
     # --- 策略0: 手动路径 ---
     if saved_path:
-        debug_lines.append(f"  [配置] 检查手动指定的路径: {saved_path}")
         if _check_exe(saved_path):
             result = _accept_exe(saved_path)
             if result:
-                return result, debug_lines
-        debug_lines.append(f"  [配置] 路径已失效，回退到自动搜索")
+                return result
 
     # --- 策略1: 精确注册表键 (Uninstall + App Paths) ---
     for hive, hive_name in (
@@ -125,38 +101,31 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
         (winreg.HKEY_CURRENT_USER, "HKCU"),
     ):
         for subkey in (
-            # Uninstall 键
             r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
             r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\QQNT",
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\QQNT",
-            # App Paths — 直接指向 QQ.exe
             r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\QQ.exe",
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\QQ.exe",
         ):
-            debug_lines.append(f"  [注册表] 尝试: {hive_name}\\{subkey}")
             try:
                 with winreg.OpenKey(hive, subkey) as key:
-                    # App Paths 的默认值就是完整路径
                     if "App Paths" in subkey:
                         try:
                             val, _ = winreg.QueryValueEx(key, "")
-                            debug_lines.append(f"  [注册表] App Paths (默认)={val}")
                             if _check_exe(val):
                                 result = _accept_exe(val)
                                 if result:
-                                    return result, debug_lines
+                                    return result
                         except OSError:
                             pass
                     result = _try_key_values(key, f"{hive_name}\\{subkey}")
                     if result:
-                        return result, debug_lines
-            except OSError as e:
-                debug_lines.append(f"  [注册表] 键不存在 ({e})")
+                        return result
+            except OSError:
                 continue
 
     # --- 策略2: 枚举 Uninstall 子键 ---
-    debug_lines.append("  [注册表] 枚举 Uninstall 子键搜索 QQ...")
     for hive, hive_name in (
         (winreg.HKEY_LOCAL_MACHINE, "HKLM"),
         (winreg.HKEY_CURRENT_USER, "HKCU"),
@@ -182,17 +151,15 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                                     continue
                                 if "QQ" not in dn and "qq" not in dn.lower() and "腾讯QQ" not in dn:
                                     continue
-                                debug_lines.append(f"  [注册表] 匹配: {hive_name}\\...\\{subkey_name} -> {dn}")
                                 result = _try_key_values(sk, f"{hive_name}\\...\\{subkey_name}")
                                 if result:
-                                    return result, debug_lines
-                        except OSError as e:
-                            debug_lines.append(f"  [注册表] 打开子键失败 {subkey_name}: {e}")
-            except OSError as e:
-                debug_lines.append(f"  [注册表] 打开 Uninstall 基键失败 {hive_name}\\{uninstall_base}: {e}")
+                                    return result
+                        except OSError:
+                            pass
+            except OSError:
+                pass
 
     # --- 策略3: 扫描常见安装目录 ---
-    debug_lines.append("  [搜索] 扫描常见安装目录...")
     search_roots: set[str] = set()
 
     for drive in ("C:", "D:", "E:", "F:", "G:"):
@@ -215,20 +182,16 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
             continue
         for sub in ("QQNT", "QQ", "TIM"):
             candidate = os.path.join(root, sub)
-            debug_lines.append(f"  [搜索] 尝试: {candidate}")
-            # 直接根目录
             if _check_exe(os.path.join(candidate, "QQ.exe")):
                 result = _accept_exe(os.path.join(candidate, "QQ.exe"))
                 if result:
-                    return result, debug_lines
-            # 常见子目录: Bin、bin、App
+                    return result
             for subdir in ("Bin", "bin", "app", "App"):
                 sub_exe = os.path.join(candidate, subdir, "QQ.exe")
                 if _check_exe(sub_exe):
                     result = _accept_exe(sub_exe)
                     if result:
-                        return result, debug_lines
-            # QQNT 版本号子目录
+                        return result
             if sub == "QQNT":
                 try:
                     for item in sorted(os.listdir(candidate), reverse=True):
@@ -237,12 +200,11 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                             if _check_exe(qq_exe):
                                 result = _accept_exe(qq_exe)
                                 if result:
-                                    return result, debug_lines
+                                    return result
                 except OSError:
                     continue
 
-    # --- 策略4: 递归搜索 Tencent 目录（深度限制，兜底残缺 MSI 安装）---
-    debug_lines.append("  [搜索] 递归搜索 Tencent 目录...")
+    # --- 策略4: 递归搜索 Tencent 目录（深度限制）---
     for drive in ("C:", "D:", "E:"):
         for prog in ("Program Files", "Program Files (x86)"):
             tencent_root = os.path.join(f"{drive}\\", prog, "Tencent")
@@ -250,25 +212,19 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                 continue
             try:
                 for dirpath, dirnames, filenames in os.walk(tencent_root):
-                    # 限制深度，避免扫到天荒地老
                     depth = dirpath[len(tencent_root):].count(os.sep)
                     if depth > 4:
                         dirnames.clear()
                         continue
                     if "QQ.exe" in filenames:
                         qq_exe = os.path.join(dirpath, "QQ.exe")
-                        debug_lines.append(f"  [搜索] 递归命中: {qq_exe}")
                         result = _accept_exe(qq_exe)
                         if result:
-                            return result, debug_lines
+                            return result
             except OSError:
                 continue
 
-    debug_lines.append("  [搜索] 所有策略均未找到 QQNT")
-    if _legacy_found:
-        debug_lines.append(f"  [搜索] ⚠ 找到旧版 QQ（不支持）: {', '.join(_legacy_found)}")
-        debug_lines.append(f"  [搜索] ⚠ 请安装 QQNT（Electron 版 QQ），旧版 Win32 QQ 无法被 NapCat 注入")
-    return None, debug_lines
+    return None
 
 
 def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None, saved_qq_path: str = "") -> subprocess.Popen:
@@ -280,12 +236,7 @@ def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None, saved
         if log_cb:
             log_cb(msg)
 
-    _log(f"[调试] 启动器: {launcher_exe}")
-    _log(f"[调试] NapCat 目录: {napcat_dir}")
-
-    qq_exe, qq_debug = _find_qq_exe(saved_path=saved_qq_path)
-    for line in qq_debug:
-        _log(line)
+    qq_exe = _find_qq_exe(saved_path=saved_qq_path)
 
     if not qq_exe:
         raise FileNotFoundError(
@@ -294,7 +245,6 @@ def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None, saved
         )
 
     hook_dll = os.path.join(napcat_dir, "NapCatWinBootHook.dll")
-    _log(f"[调试] Hook DLL: {hook_dll} (存在={os.path.isfile(hook_dll)})")
     if not os.path.isfile(hook_dll):
         raise FileNotFoundError(f"未找到 Hook DLL: {hook_dll}")
 
@@ -304,10 +254,6 @@ def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None, saved
     env["NAPCAT_INJECT_PATH"] = hook_dll
     env["NAPCAT_LAUNCHER_PATH"] = launcher_exe
     env["NAPCAT_MAIN_PATH"] = os.path.join(napcat_dir, "napcat.mjs")
-
-    _log(f"[调试] NAPCAT_PATCH_PACKAGE={env['NAPCAT_PATCH_PACKAGE']}")
-    _log(f"[调试] NAPCAT_LOAD_PATH={env['NAPCAT_LOAD_PATH']}")
-    _log(f"[调试] 命令行: {launcher_exe} \"{qq_exe}\" \"{hook_dll}\"")
 
     return subprocess.Popen(
         [launcher_exe, qq_exe, hook_dll],
@@ -324,7 +270,6 @@ def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None, saved
 
 
 # --- stdout 模式匹配 ---
-# 只匹配 OneBot 协议适配器完成初始化的消息，避免把 WebUi 的 URL 误判为 API 就绪
 ONEBOT_READY_PATTERN = re.compile(
     r"OneBot11.*(?:初始化完成|适配器.*完成|已加载)|"
     r"\[OneBot11\].*network.*配置加载",
@@ -350,7 +295,6 @@ QR_IMAGE_PATTERN = re.compile(
     r"二维码已保存[到至]?\s*[:：]?\s*(.+)",
     re.IGNORECASE,
 )
-# 匹配 "可用于快速登录" 之后的账号行，如 "1. 3234089021 射命丸 约沂"
 QUICK_LOGIN_HEADER_PATTERN = re.compile(
     r"快速登录|quick\s*login| cached ",
     re.IGNORECASE,
@@ -383,79 +327,56 @@ class NapCatMonitorThread(QThread):
         self._account_buffer = ""
         self._collecting_accounts = False
         self._napcat_dir = napcat_dir
-        self._lines_received = 0
 
     def run(self):
-        self.line_received.emit(f"[调试-监控] stdout 监控线程启动 (PID={self._process.pid})")
         try:
             for line in iter(self._process.stdout.readline, ""):
                 if self._stop_flag:
-                    self.line_received.emit("[调试-监控] 收到停止信号")
                     break
                 if not line:
-                    self.line_received.emit("[调试-监控] stdout EOF (管道关闭)")
                     break
-                self._lines_received += 1
                 line_str = line.strip()
                 if not line_str:
                     continue
-
-                if self._lines_received <= 3:
-                    # 首批输出行做诊断用
-                    self.line_received.emit(f"[调试-监控] 首批输出#{self._lines_received}: {line_str[:120]}")
                 self.line_received.emit(line_str)
                 self._scan_line(line_str)
-        except Exception as e:
-            self.line_received.emit(f"[调试-监控] stdout 读取异常: {e}")
-            import traceback
-            self.line_received.emit(f"[调试-监控] 堆栈: {traceback.format_exc()}")
+        except Exception:
+            pass
         finally:
             rc = self._process.poll()
-            self.line_received.emit(
-                f"[调试-监控] 监控线程结束, 共收到 {self._lines_received} 行, "
-                f"进程poll={rc} (None=还在跑)"
-            )
             self.process_exited.emit(rc if rc is not None else -1)
 
     def _scan_line(self, line: str):
         """扫描 stdout 行中的关键事件"""
-        # QQ 启动 / Hook 注入成功
         if not self._qq_launched and QQ_WINDOW_PATTERN.search(line):
             self._qq_launched = True
             self.qq_launched.emit()
 
-        # QR 码图片路径
         m = QR_IMAGE_PATTERN.search(line)
         if m:
             path = m.group(1).strip()
             if os.path.isfile(path):
                 self.qr_image_ready.emit(path)
 
-        # 账号已登录,无法重复登录
         m = LOGIN_BUSY_PATTERN.search(line)
         if m:
-            # 尝试提取 QQ 号
             qq_match = re.search(r"(\d{5,15})", line)
             busy_qq = qq_match.group(1) if qq_match else ""
             self.login_busy.emit(busy_qq)
             return
 
-        # 登录成功
         if LOGIN_SUCCESS_PATTERN.search(line):
             self.login_success.emit(line)
             return
 
-        # 登录失败
         m = LOGIN_FAIL_PATTERN.search(line)
         if m:
             self.login_failed.emit(line)
             return
 
-        # OneBot 适配器初始化完成
         if ONEBOT_READY_PATTERN.search(line):
             self.onebot_ready.emit(5700, 5701)
 
-        # 快速登录账号列表检测
         self._detect_quick_login_accounts(line)
 
     def _detect_quick_login_accounts(self, line: str):
@@ -469,14 +390,12 @@ class NapCatMonitorThread(QThread):
             return
 
         if self._collecting_accounts:
-            # 账号行格式: "1. 3234089021 射命丸 约沂"
             m = re.match(r"^\s*(\d+)\.\s*(\d{5,15})\s+(.+)", line)
             if m:
                 qq = m.group(2)
                 nickname = m.group(3).strip()
                 self._account_buffer += f"{qq}|{nickname}\n"
                 return
-            # 空行或非账号行 → 收集结束
             if self._account_buffer:
                 accounts = []
                 for aline in self._account_buffer.strip().split("\n"):
@@ -513,7 +432,6 @@ class NapCatManager:
         self._state = AppState.instance()
         self._intentional_stop = False
 
-        # 连接 monitor 信号到全局 state 信号
         self._monitor_connected = False
 
     @property
@@ -534,76 +452,45 @@ class NapCatManager:
             return True
 
         # 杀掉上次残留的 QQ.exe，避免 "已登录无法重复登录"
-        _log("[调试] 步骤1: 清理残留 QQ.exe")
         if os.name == "nt":
             try:
-                r = subprocess.run(
+                subprocess.run(
                     'taskkill /F /IM QQ.exe',
                     shell=True, capture_output=True, timeout=5,
                 )
-                _log(f"[调试] taskkill QQ.exe: returncode={r.returncode}")
-            except Exception as e:
-                _log(f"[调试] taskkill QQ.exe 异常: {e}")
+            except Exception:
+                pass
 
-        _log(f"[调试] 步骤2: 查找启动器 (napcat_root={self._napcat_root})")
         launcher = find_napcat_executable(self._napcat_root)
         if not launcher:
             _log(f"错误: 在 {self._napcat_root} 中找不到 NapCat 启动脚本")
-
-            # 额外诊断：列出目录内容
-            for sub in ("napcat", ""):
-                d = os.path.join(self._napcat_root, sub)
-                if os.path.isdir(d):
-                    try:
-                        items = os.listdir(d)[:20]
-                        _log(f"[调试] {d} 内容: {items}")
-                    except Exception:
-                        pass
-
             return False
 
         is_bat = launcher.lower().endswith(".bat")
-        _log(f"[调试] 启动器: {launcher} (类型={'bat' if is_bat else 'exe'})")
 
         # webui.json autoLoginAccount — 快登时设QQ号，扫码时清空
-        _log(f"[调试] 步骤3: 设置 autoLoginAccount={qq or '(清空-扫码模式)'}")
         set_auto_login_account(self._napcat_root, qq)
 
         # 生成/更新 OneBot 配置
-        _log(f"[调试] 步骤4: 生成 OneBot 配置 (HTTP:{self.HTTP_PORT}, WS:{self.WS_PORT})")
         try:
-            cfg_path = generate_onebot_config(
+            generate_onebot_config(
                 self._napcat_root,
                 qq=qq,
                 http_port=self.HTTP_PORT,
                 ws_port=self.WS_PORT,
                 reuse_existing=True,
             )
-            _log(f"[调试] OneBot 配置路径: {cfg_path}")
-        except Exception as e:
-            _log(f"[调试] OneBot 配置生成异常: {e}")
+        except Exception:
+            pass
 
         mode = f"自动登录 (QQ:{qq})" if qq else "扫码登录"
         _log(f"正在启动 NapCat ({mode})...")
 
         napcat_dir = os.path.dirname(launcher)
-        _log(f"[调试] 步骤5: NapCat 工作目录={napcat_dir}")
-
-        # 检查关键文件
-        for fn in ("napcat.mjs", "NapCatWinBootHook.dll", "qqnt.json"):
-            fp = os.path.join(napcat_dir, fn)
-            _log(f"[调试]   关键文件 {fn}: {'存在' if os.path.isfile(fp) else '缺失!'}")
-
-        # 确保 loadNapCat.js 存在（v5+ 引导入口）
         _ensure_load_napcat_js(napcat_dir)
-        ljs = os.path.join(napcat_dir, "loadNapCat.js")
-        _log(f"[调试]   loadNapCat.js: {'存在' if os.path.isfile(ljs) else '缺失!'}")
-
-        _log(f"[调试] 步骤6: 启动子进程 (is_bat={is_bat})")
 
         try:
             if is_bat:
-                _log(f"[调试] 用 shell=True 启动 bat: {launcher}")
                 self._process = subprocess.Popen(
                     f'"{launcher}"',
                     cwd=napcat_dir,
@@ -617,76 +504,20 @@ class NapCatManager:
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 )
             else:
-                # 直接启动 exe — stdout 不断，可正确跟踪进程
                 self._process = _launch_napcat_direct(launcher, napcat_dir, log_cb=_log, saved_qq_path=saved_qq_path)
-            _log(f"[调试] 子进程已启动, PID={self._process.pid}")
         except FileNotFoundError as e:
-            _log(f"[调试] FileNotFoundError: {e}")
             _log(f"启动失败: {e}")
             return False
         except Exception as e:
-            _log(f"[调试] 启动异常 ({type(e).__name__}): {e}")
             _log(f"启动失败: {e}")
             return False
 
-        # 启动 stdout 监控线程
-        _log("[调试] 步骤7: 启动 stdout 监控线程")
         self._monitor = NapCatMonitorThread(self._process, napcat_dir=napcat_dir)
         self._connect_monitor()
         self._monitor.start()
 
-        # 8 秒后诊断：如果 stdout 始终无输出，查 NapCat 日志文件
-        from PyQt6.QtCore import QTimer
-        self._diag_timer = QTimer()
-        self._diag_timer.setSingleShot(True)
-        self._diag_timer.timeout.connect(lambda: self._diag_stdout_silence(napcat_dir))
-        self._diag_timer.start(8000)
-
         _log(f"NapCat 已启动 ({mode}) [PID={self._process.pid}]")
         return True
-
-    def _diag_stdout_silence(self, napcat_dir: str):
-        """如果启动后 8 秒内 stdout 无任何输出，打印 NapCat 日志目录内容"""
-        if self._monitor and self._monitor._lines_received > 0:
-            return  # stdout 有输出，正常
-
-        def _log(msg):
-            self._state.napcat_status.emit(msg)
-
-        _log("[诊断] stdout 8 秒内无任何输出，检查 NapCat 日志文件...")
-        log_dirs = [
-            os.path.join(napcat_dir, "logs"),
-            os.path.join(os.path.dirname(napcat_dir), "logs"),
-            os.path.join(napcat_dir, "log"),
-        ]
-        for ld in log_dirs:
-            if os.path.isdir(ld):
-                try:
-                    files = sorted(os.listdir(ld))[-10:]  # 最近10个文件
-                    _log(f"[诊断] 日志目录 {ld}: {files}")
-                    # 尝试读最新的 .log 文件最后几行
-                    for fn in reversed(files):
-                        if fn.endswith(".log") or fn.endswith(".txt"):
-                            try:
-                                with open(os.path.join(ld, fn), "r", encoding="utf-8", errors="replace") as f:
-                                    lines = f.readlines()
-                                    for line in lines[-5:]:
-                                        _log(f"[诊断] {fn}: {line.strip()[:200]}")
-                            except Exception:
-                                pass
-                            break
-                except Exception as e:
-                    _log(f"[诊断] 读取日志目录失败: {e}")
-
-        # 同时检查 qqnt.json 是否被 NapCat 写过
-        qqnt_json = os.path.join(napcat_dir, "qqnt.json")
-        if os.path.isfile(qqnt_json):
-            try:
-                mtime = os.path.getmtime(qqnt_json)
-                import datetime
-                _log(f"[诊断] qqnt.json 修改时间: {datetime.datetime.fromtimestamp(mtime)}")
-            except Exception:
-                pass
 
     def stop(self):
         """停止 NapCat 并清理整个进程树"""
@@ -729,7 +560,6 @@ class NapCatManager:
                         t2 = threading.Thread(target=kill_exes)
                         t1.start(); t2.start()
                         t1.join(timeout=8); t2.join(timeout=8)
-                    # 额外确保 QQ.exe 被杀掉（NapCat 注入的 QQ 可能不在进程树内）
                     try:
                         subprocess.run(
                             'taskkill /F /IM QQ.exe',
@@ -774,12 +604,9 @@ class NapCatManager:
 
     def _on_login_success(self, line: str):
         self._state.napcat_status.emit("登录成功")
-        # 不 emit login_status_changed(True) —
-        # main_window 的轮询通过 get_login_info() 获取准确的昵称和QQ号
 
     def _on_login_failed(self, reason: str):
         clean = re.sub(r"\x1b\[[0-9;]*m", "", reason).strip()
-        # 截断为简短摘要，避免 stdout 垃圾污染状态栏
         short = clean[:60] + "..." if len(clean) > 60 else clean
         self._state.login_status_changed.emit(False, short)
         self._state.napcat_status.emit(f"登录失败: {short}")
@@ -797,7 +624,6 @@ class NapCatManager:
         self._state.napcat_status.emit(f"检测到可用账号: {names}")
 
     def _on_onebot_ready(self, http_port: int, ws_port: int):
-        # 适配器初始化完成后，HTTP 服务器还需要一点时间才真正开始监听
         self._state.napcat_status.emit(
             "OneBot 适配器已初始化，等待 HTTP 服务就绪..."
         )
@@ -809,20 +635,13 @@ class NapCatManager:
         self._state.onebot_ready.emit(http_port, ws_port)
 
     def _on_process_exited(self, rc: int):
-        self._state.napcat_status.emit(
-            f"[调试] 进程退出事件: rc={rc}, intentional_stop={self._intentional_stop}, "
-            f"process_is_None={self._process is None}"
-        )
         self._process = None
         self._monitor_connected = False
         if self._intentional_stop:
             self._intentional_stop = False
             self._state.napcat_status.emit(f"NapCat 已停止 (code={rc})")
         elif rc is not None and rc > 0:
-            # 明确的正数退出码 = 真崩溃
             self._state.napcat_status.emit(f"NapCat 异常退出 (code={rc}) — 常见原因: QQ未安装/版本不兼容/被杀毒拦截")
             self._state.login_status_changed.emit(False, f"NapCat 异常退出 (code={rc})")
         else:
-            # rc=0（正常退出）或 rc=None→-1（bat后台化cmd先死，node可能还在跑）
-            # 不 emit login_status_changed，让 HTTP 轮询判断真实状态
             self._state.napcat_status.emit("NapCat 启动器已退出，等待 OneBot 就绪...")
