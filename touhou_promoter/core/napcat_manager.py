@@ -111,24 +111,25 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                         # 不预过滤子键名 — MSI安装的键名是GUID不包含QQ
                         try:
                             with winreg.OpenKey(base, subkey_name) as sk:
-                                dn, _ = winreg.QueryValueEx(sk, "DisplayName")
+                                try:
+                                    dn, _ = winreg.QueryValueEx(sk, "DisplayName")
+                                except OSError:
+                                    continue
+                                if "QQ" not in dn and "qq" not in dn.lower() and "腾讯QQ" not in dn:
+                                    continue
+                                debug_lines.append(f"  [注册表] 匹配: {hive_name}\\...\\{subkey_name} -> {dn}")
+                                for val_name in ("UninstallString", "DisplayIcon", "InstallLocation"):
+                                    try:
+                                        val, _ = winreg.QueryValueEx(sk, val_name)
+                                        debug_lines.append(f"  [注册表] {val_name}={val}")
+                                        qq_dir = val if val_name == "InstallLocation" else os.path.dirname(val)
+                                        qq_exe = os.path.join(qq_dir, "QQ.exe")
+                                        if _check_exe(qq_exe):
+                                            return qq_exe, debug_lines
+                                    except OSError:
+                                        continue
                         except OSError:
                             continue
-                        if "QQ" not in dn and "qq" not in dn.lower() and "腾讯QQ" not in dn:
-                            continue
-                        debug_lines.append(f"  [注册表] 匹配: {hive_name}\\...\\{subkey_name} -> {dn}")
-                        for val_name in ("UninstallString", "DisplayIcon", "InstallLocation"):
-                            try:
-                                val, _ = winreg.QueryValueEx(sk, val_name)
-                                debug_lines.append(f"  [注册表] {val_name}={val}")
-                                qq_dir = val if val_name == "InstallLocation" else os.path.dirname(val)
-                                qq_exe = os.path.join(qq_dir, "QQ.exe")
-                                if _check_exe(qq_exe):
-                                    return qq_exe, debug_lines
-                            except OSError:
-                                continue
-            except OSError:
-                continue
 
     # --- 策略3: 扫描常见安装目录 ---
     debug_lines.append("  [搜索] 扫描常见安装目录...")
