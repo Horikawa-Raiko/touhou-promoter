@@ -591,8 +591,58 @@ class NapCatManager:
         self._connect_monitor()
         self._monitor.start()
 
+        # 8 秒后诊断：如果 stdout 始终无输出，查 NapCat 日志文件
+        from PyQt6.QtCore import QTimer
+        self._diag_timer = QTimer()
+        self._diag_timer.setSingleShot(True)
+        self._diag_timer.timeout.connect(lambda: self._diag_stdout_silence(napcat_dir))
+        self._diag_timer.start(8000)
+
         _log(f"NapCat 已启动 ({mode}) [PID={self._process.pid}]")
         return True
+
+    def _diag_stdout_silence(self, napcat_dir: str):
+        """如果启动后 8 秒内 stdout 无任何输出，打印 NapCat 日志目录内容"""
+        if self._monitor and self._monitor._lines_received > 0:
+            return  # stdout 有输出，正常
+
+        def _log(msg):
+            self._state.napcat_status.emit(msg)
+
+        _log("[诊断] stdout 8 秒内无任何输出，检查 NapCat 日志文件...")
+        log_dirs = [
+            os.path.join(napcat_dir, "logs"),
+            os.path.join(os.path.dirname(napcat_dir), "logs"),
+            os.path.join(napcat_dir, "log"),
+        ]
+        for ld in log_dirs:
+            if os.path.isdir(ld):
+                try:
+                    files = sorted(os.listdir(ld))[-10:]  # 最近10个文件
+                    _log(f"[诊断] 日志目录 {ld}: {files}")
+                    # 尝试读最新的 .log 文件最后几行
+                    for fn in reversed(files):
+                        if fn.endswith(".log") or fn.endswith(".txt"):
+                            try:
+                                with open(os.path.join(ld, fn), "r", encoding="utf-8", errors="replace") as f:
+                                    lines = f.readlines()
+                                    for line in lines[-5:]:
+                                        _log(f"[诊断] {fn}: {line.strip()[:200]}")
+                            except Exception:
+                                pass
+                            break
+                except Exception as e:
+                    _log(f"[诊断] 读取日志目录失败: {e}")
+
+        # 同时检查 qqnt.json 是否被 NapCat 写过
+        qqnt_json = os.path.join(napcat_dir, "qqnt.json")
+        if os.path.isfile(qqnt_json):
+            try:
+                mtime = os.path.getmtime(qqnt_json)
+                import datetime
+                _log(f"[诊断] qqnt.json 修改时间: {datetime.datetime.fromtimestamp(mtime)}")
+            except Exception:
+                pass
 
     def stop(self):
         """停止 NapCat 并清理整个进程树"""
