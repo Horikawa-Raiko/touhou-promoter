@@ -66,11 +66,11 @@ def _find_qq_exe() -> tuple:
             debug_lines.append(f"  [注册表] 尝试: {hive_name}\\{subkey}")
             try:
                 with winreg.OpenKey(hive, subkey) as key:
-                    for val_name in ("UninstallString", "DisplayIcon"):
+                    for val_name in ("UninstallString", "DisplayIcon", "InstallLocation"):
                         try:
                             val, _ = winreg.QueryValueEx(key, val_name)
                             debug_lines.append(f"  [注册表] {val_name}={val}")
-                            qq_dir = os.path.dirname(val)
+                            qq_dir = val if val_name == "InstallLocation" else os.path.dirname(val)
                             qq_exe = os.path.join(qq_dir, "QQ.exe")
                             if _check_exe(qq_exe):
                                 return qq_exe, debug_lines
@@ -109,11 +109,11 @@ def _find_qq_exe() -> tuple:
                         if "QQ" not in dn and "qq" not in dn.lower():
                             continue
                         debug_lines.append(f"  [注册表] 匹配: {hive_name}\\...\\{subkey_name} -> {dn}")
-                        for val_name in ("UninstallString", "DisplayIcon"):
+                        for val_name in ("UninstallString", "DisplayIcon", "InstallLocation"):
                             try:
                                 val, _ = winreg.QueryValueEx(sk, val_name)
                                 debug_lines.append(f"  [注册表] {val_name}={val}")
-                                qq_dir = os.path.dirname(val)
+                                qq_dir = val if val_name == "InstallLocation" else os.path.dirname(val)
                                 qq_exe = os.path.join(qq_dir, "QQ.exe")
                                 if _check_exe(qq_exe):
                                     return qq_exe, debug_lines
