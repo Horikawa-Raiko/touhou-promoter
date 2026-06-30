@@ -35,6 +35,84 @@ def _ensure_load_napcat_js(napcat_dir: str):
             pass
 
 
+def _find_qq_exe() -> tuple:
+    """从注册表查找 QQ.exe 路径，返回 (路径或None, [调试行列表])"""
+    import winreg
+    debug_lines = []
+    for subkey in (
+        r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\QQ",
+    ):
+        debug_lines.append(f"  [注册表] 尝试: {subkey}")
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, subkey) as key:
+                uninst, _ = winreg.QueryValueEx(key, "UninstallString")
+                debug_lines.append(f"  [注册表] UninstallString={uninst}")
+                qq_dir = os.path.dirname(uninst)
+                qq_exe = os.path.join(qq_dir, "QQ.exe")
+                if os.path.isfile(qq_exe):
+                    debug_lines.append(f"  [注册表] QQ.exe 存在: {qq_exe}")
+                    return qq_exe, debug_lines
+                else:
+                    debug_lines.append(f"  [注册表] QQ.exe 不存在于: {qq_exe}")
+        except OSError:
+            debug_lines.append(f"  [注册表] 键不存在")
+            continue
+    debug_lines.append("  [注册表] 未找到 QQ 安装信息")
+    return None, debug_lines
+
+
+def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None) -> subprocess.Popen:
+    """直接启动 NapCatWinBootMain.exe（shell=False，stdout 不会断）。
+
+    复刻 launcher-user.bat 的逻辑：设环境变量、找 QQ.exe、启动。
+    """
+    def _log(msg):
+        if log_cb:
+            log_cb(msg)
+
+    _log(f"[调试] 启动器: {launcher_exe}")
+    _log(f"[调试] NapCat 目录: {napcat_dir}")
+
+    qq_exe, qq_debug = _find_qq_exe()
+    for line in qq_debug:
+        _log(line)
+
+    if not qq_exe:
+        raise FileNotFoundError(
+            "未找到 QQ.exe，请确认 QQ 已安装（注册表无安装记录）"
+        )
+
+    hook_dll = os.path.join(napcat_dir, "NapCatWinBootHook.dll")
+    _log(f"[调试] Hook DLL: {hook_dll} (存在={os.path.isfile(hook_dll)})")
+    if not os.path.isfile(hook_dll):
+        raise FileNotFoundError(f"未找到 Hook DLL: {hook_dll}")
+
+    env = os.environ.copy()
+    env["NAPCAT_PATCH_PACKAGE"] = os.path.join(napcat_dir, "qqnt.json")
+    env["NAPCAT_LOAD_PATH"] = os.path.join(napcat_dir, "loadNapCat.js")
+    env["NAPCAT_INJECT_PATH"] = hook_dll
+    env["NAPCAT_LAUNCHER_PATH"] = launcher_exe
+    env["NAPCAT_MAIN_PATH"] = os.path.join(napcat_dir, "napcat.mjs")
+
+    _log(f"[调试] NAPCAT_PATCH_PACKAGE={env['NAPCAT_PATCH_PACKAGE']}")
+    _log(f"[调试] NAPCAT_LOAD_PATH={env['NAPCAT_LOAD_PATH']}")
+    _log(f"[调试] 命令行: {launcher_exe} \"{qq_exe}\" \"{hook_dll}\"")
+
+    return subprocess.Popen(
+        [launcher_exe, qq_exe, hook_dll],
+        cwd=napcat_dir,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+
+
 # --- stdout 模式匹配 ---
 # 只匹配 OneBot 协议适配器完成初始化的消息，避免把 WebUi 的 URL 误判为 API 就绪
 ONEBOT_READY_PATTERN = re.compile(
@@ -86,7 +164,7 @@ class NapCatMonitorThread(QThread):
     onebot_ready = pyqtSignal(int, int)      # (http_port, ws_port)
     process_exited = pyqtSignal(int)         # 进程退出码
 
-    def __init__(self, process: subprocess.Popen, parent=None):
+    def __init__(self, process: subprocess.Popen, parent=None, napcat_dir: str = ""):
         super().__init__(parent)
         self._process = process
         self._stop_flag = False
@@ -94,24 +172,39 @@ class NapCatMonitorThread(QThread):
         self._quick_login_detected = False
         self._account_buffer = ""
         self._collecting_accounts = False
+        self._napcat_dir = napcat_dir
+        self._lines_received = 0
 
     def run(self):
+        self.line_received.emit(f"[调试-监控] stdout 监控线程启动 (PID={self._process.pid})")
         try:
             for line in iter(self._process.stdout.readline, ""):
                 if self._stop_flag:
+                    self.line_received.emit("[调试-监控] 收到停止信号")
                     break
                 if not line:
-                    continue
+                    self.line_received.emit("[调试-监控] stdout EOF (管道关闭)")
+                    break
+                self._lines_received += 1
                 line_str = line.strip()
                 if not line_str:
                     continue
 
+                if self._lines_received <= 3:
+                    # 首批输出行做诊断用
+                    self.line_received.emit(f"[调试-监控] 首批输出#{self._lines_received}: {line_str[:120]}")
                 self.line_received.emit(line_str)
                 self._scan_line(line_str)
-        except Exception:
-            pass
+        except Exception as e:
+            self.line_received.emit(f"[调试-监控] stdout 读取异常: {e}")
+            import traceback
+            self.line_received.emit(f"[调试-监控] 堆栈: {traceback.format_exc()}")
         finally:
             rc = self._process.poll()
+            self.line_received.emit(
+                f"[调试-监控] 监控线程结束, 共收到 {self._lines_received} 行, "
+                f"进程poll={rc} (None=还在跑)"
+            )
             self.process_exited.emit(rc if rc is not None else -1)
 
     def _scan_line(self, line: str):
@@ -223,70 +316,115 @@ class NapCatManager:
         Args:
             qq: 若不为空，传递给 NapCatWinBootMain.exe 实现免扫码快登
         """
+        def _log(msg):
+            self._state.napcat_status.emit(msg)
+
         if self.is_running():
             return True
 
         # 杀掉上次残留的 QQ.exe，避免 "已登录无法重复登录"
+        _log("[调试] 步骤1: 清理残留 QQ.exe")
         if os.name == "nt":
             try:
-                subprocess.run(
+                r = subprocess.run(
                     'taskkill /F /IM QQ.exe',
                     shell=True, capture_output=True, timeout=5,
                 )
-            except Exception:
-                pass
+                _log(f"[调试] taskkill QQ.exe: returncode={r.returncode}")
+            except Exception as e:
+                _log(f"[调试] taskkill QQ.exe 异常: {e}")
 
+        _log(f"[调试] 步骤2: 查找启动器 (napcat_root={self._napcat_root})")
         launcher = find_napcat_executable(self._napcat_root)
         if not launcher:
-            self._state.napcat_status.emit(f"错误: 在 {self._napcat_root} 中找不到 NapCat 启动脚本")
+            _log(f"错误: 在 {self._napcat_root} 中找不到 NapCat 启动脚本")
+
+            # 额外诊断：列出目录内容
+            for sub in ("napcat", ""):
+                d = os.path.join(self._napcat_root, sub)
+                if os.path.isdir(d):
+                    try:
+                        items = os.listdir(d)[:20]
+                        _log(f"[调试] {d} 内容: {items}")
+                    except Exception:
+                        pass
+
             return False
 
+        is_bat = launcher.lower().endswith(".bat")
+        _log(f"[调试] 启动器: {launcher} (类型={'bat' if is_bat else 'exe'})")
+
         # webui.json autoLoginAccount — 快登时设QQ号，扫码时清空
+        _log(f"[调试] 步骤3: 设置 autoLoginAccount={qq or '(清空-扫码模式)'}")
         set_auto_login_account(self._napcat_root, qq)
 
         # 生成/更新 OneBot 配置
-        generate_onebot_config(
-            self._napcat_root,
-            qq=qq,
-            http_port=self.HTTP_PORT,
-            ws_port=self.WS_PORT,
-            reuse_existing=True,
-        )
+        _log(f"[调试] 步骤4: 生成 OneBot 配置 (HTTP:{self.HTTP_PORT}, WS:{self.WS_PORT})")
+        try:
+            cfg_path = generate_onebot_config(
+                self._napcat_root,
+                qq=qq,
+                http_port=self.HTTP_PORT,
+                ws_port=self.WS_PORT,
+                reuse_existing=True,
+            )
+            _log(f"[调试] OneBot 配置路径: {cfg_path}")
+        except Exception as e:
+            _log(f"[调试] OneBot 配置生成异常: {e}")
 
         mode = f"自动登录 (QQ:{qq})" if qq else "扫码登录"
-        self._state.napcat_status.emit(f"正在启动 NapCat ({mode})...")
+        _log(f"正在启动 NapCat ({mode})...")
 
         napcat_dir = os.path.dirname(launcher)
+        _log(f"[调试] 步骤5: NapCat 工作目录={napcat_dir}")
 
-        # 只通过 webui.json 的 autoLoginAccount 传递账号信息，
-        # 不在命令行上传 qq（等价于 -q 强制快登）。
-        # -q 模式下遇到「当前账号已登录」NapCat 会直接退出进程，
-        # 而仅靠 autoLoginAccount 时 NapCat 快登失败会降级回二维码模式继续运行。
-        cmd = f'"{launcher}"'
+        # 检查关键文件
+        for fn in ("napcat.mjs", "NapCatWinBootHook.dll", "qqnt.json"):
+            fp = os.path.join(napcat_dir, fn)
+            _log(f"[调试]   关键文件 {fn}: {'存在' if os.path.isfile(fp) else '缺失!'}")
+
+        # 确保 loadNapCat.js 存在（v5+ 引导入口）
+        _ensure_load_napcat_js(napcat_dir)
+        ljs = os.path.join(napcat_dir, "loadNapCat.js")
+        _log(f"[调试]   loadNapCat.js: {'存在' if os.path.isfile(ljs) else '缺失!'}")
+
+        _log(f"[调试] 步骤6: 启动子进程 (is_bat={is_bat})")
 
         try:
-            self._process = subprocess.Popen(
-                cmd,
-                cwd=napcat_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                shell=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            )
+            if is_bat:
+                _log(f"[调试] 用 shell=True 启动 bat: {launcher}")
+                self._process = subprocess.Popen(
+                    f'"{launcher}"',
+                    cwd=napcat_dir,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    stdin=subprocess.DEVNULL,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    shell=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+            else:
+                # 直接启动 exe — stdout 不断，可正确跟踪进程
+                self._process = _launch_napcat_direct(launcher, napcat_dir, log_cb=_log)
+            _log(f"[调试] 子进程已启动, PID={self._process.pid}")
+        except FileNotFoundError as e:
+            _log(f"[调试] FileNotFoundError: {e}")
+            _log(f"启动失败: {e}")
+            return False
         except Exception as e:
-            self._state.napcat_status.emit(f"启动失败: {e}")
+            _log(f"[调试] 启动异常 ({type(e).__name__}): {e}")
+            _log(f"启动失败: {e}")
             return False
 
         # 启动 stdout 监控线程
-        self._monitor = NapCatMonitorThread(self._process)
+        _log("[调试] 步骤7: 启动 stdout 监控线程")
+        self._monitor = NapCatMonitorThread(self._process, napcat_dir=napcat_dir)
         self._connect_monitor()
         self._monitor.start()
 
-        self._state.napcat_status.emit(f"NapCat 已启动 ({mode})")
+        _log(f"NapCat 已启动 ({mode}) [PID={self._process.pid}]")
         return True
 
     def stop(self):
@@ -410,6 +548,10 @@ class NapCatManager:
         self._state.onebot_ready.emit(http_port, ws_port)
 
     def _on_process_exited(self, rc: int):
+        self._state.napcat_status.emit(
+            f"[调试] 进程退出事件: rc={rc}, intentional_stop={self._intentional_stop}, "
+            f"process_is_None={self._process is None}"
+        )
         self._process = None
         self._monitor_connected = False
         if self._intentional_stop:
@@ -417,7 +559,7 @@ class NapCatManager:
             self._state.napcat_status.emit(f"NapCat 已停止 (code={rc})")
         elif rc is not None and rc > 0:
             # 明确的正数退出码 = 真崩溃
-            self._state.napcat_status.emit(f"NapCat 异常退出 (code={rc})")
+            self._state.napcat_status.emit(f"NapCat 异常退出 (code={rc}) — 常见原因: QQ未安装/版本不兼容/被杀毒拦截")
             self._state.login_status_changed.emit(False, f"NapCat 异常退出 (code={rc})")
         else:
             # rc=0（正常退出）或 rc=None→-1（bat后台化cmd先死，node可能还在跑）
