@@ -266,6 +266,41 @@
     opacity: 0.5;
   }
 
+  /* ── FAQ ── */
+  .faq-list { max-width: 760px; margin: 0 auto; }
+  .faq-item {
+    background: var(--bg-card);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .faq-item:hover { border-color: rgba(212,168,67,0.2); }
+  .faq-q {
+    padding: 18px 24px;
+    cursor: default;
+    font-weight: 700;
+    color: var(--gold);
+    font-size: 15px;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .faq-q .q-mark { flex-shrink: 0; font-size: 18px; }
+  .faq-a {
+    padding: 0 24px 20px 52px;
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.8;
+  }
+  .faq-a code {
+    background: rgba(255,255,255,0.08);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    word-break: break-all;
+  }
+  .faq-a a { color: var(--gold-light); }
+
   /* ── Responsive ── */
   @media (max-width: 768px) {
     header { padding: 48px 0 36px; }
@@ -369,6 +404,78 @@
     Windows 10 / 11 64位 · 已安装 QQNT（Electron 版）<br>
     首次启动需联网下载 NapCat（约 30MB）
   </p>
+</section>
+
+<section id="faq" class="container">
+  <h2 class="section-title">常见问题</h2>
+  <p class="section-sub">安装和使用中可能遇到的坑</p>
+  <div class="faq-list">
+
+    <div class="faq-item">
+      <div class="faq-q"><span class="q-mark">Q</span> 启动报"未找到 QQNT"但我明明装了 QQ</div>
+      <div class="faq-a">
+        <p>你装的可能是<b>旧版 Win32 QQ</b>，NapCat 只支持 <b>QQNT</b>（Electron 架构的新版 QQ）。</p>
+        <p>到 <a href="https://im.qq.com">im.qq.com</a> 下载"全新架构版"，安装后再试。</p>
+        <p>如果已确认是 QQNT 仍然报错：你可能是从 D 盘迁移或卸载重装过，注册表留下了旧路径但实际文件已不存在。在设置里手动指定 QQNT 安装目录即可。</p>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span class="q-mark">Q</span> QQ 版本太新，Worker 反复崩溃</div>
+      <div class="faq-a">
+        <p>QQNT 自动更新推的版本可能超出 NapCat 的兼容范围。</p>
+        <p>安装 NapCat 官方<b>推荐版本</b>：<code>QQ9.9.26.44343_x64.exe</code></p>
+        <p>下载地址：<a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe">https://dldir1.qq.com/qqfile/qq/QQNT/...</a></p>
+        <p><b>安装后务必阻止 QQNT 自动更新：</b>到 QQNT 安装目录下，把 <code>updater.exe</code> 改名（如 <code>updater.exe.bak</code>），否则过两天又被自动升级回去。</p>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span class="q-mark">Q</span> QQNT 版本太旧被拒绝</div>
+      <div class="faq-a">
+        <p>QQNT build 号过低（一般从旧安装包或第三方下载站获取）。</p>
+        <p>到 <a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe">这里</a> 下载官方推荐版本重新安装。</p>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span class="q-mark">Q</span> QQ 装在 D 盘或自定义路径找不到</div>
+      <div class="faq-a">
+        <p>QQNT 装在非标准路径（如 <code>D:\QQ\</code>、<code>E:\D盘迁移\Program Files(x86)\Tencent\QQNT\</code>）时可能搜不到。</p>
+        <p>在设置中<b>手动指定 QQNT 安装目录</b>即可。指定目录就行，不用精确到 QQ.exe，程序会自动扫描版本子目录。</p>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span class="q-mark">Q</span> 扫码登录正常但提示"等待超时"</div>
+      <div class="faq-a">
+        <p>NapCat 已启动并显示二维码，但宣发姬连不上它的 HTTP 服务（5700 端口）。</p>
+        <p>最常见原因：</p>
+        <p>1. <b>Windows 防火墙弹窗</b> — 第一次运行时 Windows 会弹框问"是否允许访问网络"，如果点了取消或被挡在后面，后续请求全部超时。检查任务栏或 Alt+Tab 有没有隐藏的防火墙弹窗。</p>
+        <p>2. <b>QQ 进程残留</b> — 上次崩溃的 QQ 进程没杀干净，导致 NapCat 注入失败。打开任务管理器杀掉所有 QQ.exe 和 NapCatWinBootMain.exe 进程后重试。</p>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span class="q-mark">Q</span> 快速登录点完没有反应</div>
+      <div class="faq-a">
+        <p>快速登录需要之前成功登录过一次，并且 QQ 服务器端保留了会话。如果换过设备、QQ 密码、或服务器端清除了会话，快登会失败。</p>
+        <p>此时 NapCat 会自动降级到二维码扫码模式，重新扫码登录一次即可恢复快登缓存。</p>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span class="q-mark">Q</span> 旧版 QQ 改的文件夹名含"QQNT"但实际不是</div>
+      <div class="faq-a">
+        <p>有人会把旧版 QQ 的文件夹改名来骗过检测。宣发姬会通过以下方式识别真正的 QQNT：</p>
+        <p>1. 路径是否包含 "QQNT" 字样</p>
+        <p>2. 目录下是否有 <code>QQNT.dll</code>、<code>wrapper.node</code>、<code>misc.bin</code> 等标记文件</p>
+        <p>3. QQ.exe 的文件版本号 build ≥ 40000（QQNT 的特有范围，旧版 QQ 只有几百）</p>
+        <p>三条满足其一就算 QQNT，不必担心误判。</p>
+      </div>
+    </div>
+
+  </div>
 </section>
 
 <footer class="container">
