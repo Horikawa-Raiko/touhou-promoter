@@ -936,8 +936,14 @@ class MainWindow(QMainWindow):
             self._append_log(f"[系统] 外部OneBot模式，目标: {self._onebot_url}")
             QTimer.singleShot(500, self._start_external_poll)
 
-        # 自动加载上次打开的CSV
+        # 自动加载上次打开的CSV；首次使用则用内置默认CSV
         csv_path = self._config_mgr.config.csv_path
+        if not csv_path or not os.path.isfile(csv_path):
+            bundled = self._resolve_asset("东方QQ群列表.csv")
+            if os.path.isfile(bundled):
+                csv_path = bundled
+                self._config_mgr.config.csv_path = bundled
+                self._config_mgr.save()
         if csv_path and os.path.isfile(csv_path):
             try:
                 from touhou_promoter.core.csv_loader import load_groups
@@ -1946,6 +1952,10 @@ class MainWindow(QMainWindow):
 
         # 自动重新加载CSV（用户可能外部编辑了CSV文件）
         csv_path = self._config_mgr.config.csv_path
+        if not csv_path or not os.path.isfile(csv_path):
+            bundled = self._resolve_asset("东方QQ群列表.csv")
+            if os.path.isfile(bundled):
+                csv_path = bundled
         if csv_path and os.path.isfile(csv_path):
             try:
                 from touhou_promoter.core.csv_loader import load_groups
