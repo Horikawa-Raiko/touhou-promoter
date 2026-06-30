@@ -24,6 +24,7 @@ class AppConfig:
     # OneBot 连接模式
     onebot_mode: str = "managed"             # "managed"=App管理NapCat进程 / "external"=用户自启动
     onebot_http_url: str = "http://127.0.0.1:5700"  # 外部OneBot HTTP地址
+    qq_exe_path: str = ""                    # 手动指定的 QQ.exe 路径（自动搜索失败时的回退）
 
 
 class ConfigManager:

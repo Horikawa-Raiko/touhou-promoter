@@ -35,13 +35,14 @@ def _ensure_load_napcat_js(napcat_dir: str):
             pass
 
 
-def _find_qq_exe() -> tuple:
+def _find_qq_exe(saved_path: str = "") -> tuple:
     """查找 QQ.exe 路径，返回 (路径或None, [调试行列表])。
 
-    搜索策略（由快到慢）：
+    搜索策略（逐级降级）：
+    0. 用户手动指定的路径（config.json qq_exe_path）
     1. 精确注册表键 (HKLM + HKCU, "QQ" + "QQNT")
     2. 遍历 Uninstall 子键，匹配 DisplayName 含 "QQ" 的项
-    3. 搜索常见安装目录
+    3. 搜索常见安装目录（含通配符匹配版本号子目录）
     """
     import winreg
     debug_lines = []
@@ -51,6 +52,14 @@ def _find_qq_exe() -> tuple:
             debug_lines.append(f"  [搜索] QQ.exe 存在: {path}")
             return True
         return False
+
+    # --- 策略0: 用户手动指定的路径 ---
+    if saved_path:
+        debug_lines.append(f"  [配置] 检查手动指定的路径: {saved_path}")
+        if _check_exe(saved_path):
+            return saved_path, debug_lines
+        else:
+            debug_lines.append(f"  [配置] 路径已失效，回退到自动搜索")
 
     # --- 策略1: 精确注册表键 ---
     for hive, hive_name in (
@@ -122,30 +131,63 @@ def _find_qq_exe() -> tuple:
             except OSError:
                 continue
 
-    # --- 策略3: 常见安装目录 ---
-    debug_lines.append("  [搜索] 扫描常见目录...")
-    search_dirs = [
-        os.path.expandvars(r"%ProgramFiles%\Tencent\QQNT"),
-        os.path.expandvars(r"%ProgramFiles(x86)%\Tencent\QQNT"),
-        os.path.expandvars(r"%ProgramFiles%\Tencent\QQ"),
-        os.path.expandvars(r"%ProgramFiles(x86)%\Tencent\QQ"),
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tencent\QQNT"),
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tencent\QQ"),
-        os.path.expandvars(r"%APPDATA%\Tencent\QQNT"),
-        os.path.expanduser(r"~\AppData\Roaming\Tencent\QQNT"),
-        r"D:\Program Files\Tencent\QQNT",
-    ]
-    for d in search_dirs:
-        debug_lines.append(f"  [搜索] 尝试: {d}")
-        qq_exe = os.path.join(d, "QQ.exe")
-        if _check_exe(qq_exe):
-            return qq_exe, debug_lines
+    # --- 策略3: 扫描常见安装目录 ---
+    debug_lines.append("  [搜索] 扫描常见安装目录...")
+
+    # 先收集所有候选根目录
+    search_roots = set()
+
+    # 每个驱动器的 Program Files (C: D: E: F: G:)
+    for drive in ("C:", "D:", "E:", "F:", "G:"):
+        search_roots.update([
+            rf"{drive}\Program Files\Tencent",
+            rf"{drive}\Program Files (x86)\Tencent",
+        ])
+
+    # %LOCALAPPDATA% / %APPDATA% / %USERPROFILE%
+    search_roots.update([
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tencent"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Tencent"),
+        os.path.expandvars(r"%APPDATA%\Tencent"),
+        os.path.expanduser(r"~\Tencent"),
+        os.path.expanduser(r"~\Desktop\Tencent"),
+        os.path.expanduser(r"~\Downloads\Tencent"),
+    ])
+
+    # 遍历每个根目录，试 QQNT/QQ/TIM 子目录 + 版本号子目录
+    for root in sorted(search_roots):
+        if not os.path.isdir(root):
+            continue
+        for sub in ("QQNT", "QQ", "TIM"):
+            candidate = os.path.join(root, sub)
+            # 先试直接的 QQ.exe
+            debug_lines.append(f"  [搜索] 尝试: {candidate}")
+            qq_exe = os.path.join(candidate, "QQ.exe")
+            if _check_exe(qq_exe):
+                return qq_exe, debug_lines
+            # QQNT 可能有版本号子目录，如 QQNT\9.9.12\QQ.exe
+            if sub == "QQNT":
+                try:
+                    for item in sorted(os.listdir(candidate), reverse=True):
+                        ver_dir = os.path.join(candidate, item)
+                        if not os.path.isdir(ver_dir):
+                            continue
+                        qq_exe = os.path.join(ver_dir, "QQ.exe")
+                        if _check_exe(qq_exe):
+                            return qq_exe, debug_lines
+                except OSError:
+                    continue
+            # TIM 的 QQ.exe 可能在 Bin 子目录下
+            if sub == "TIM":
+                bin_exe = os.path.join(candidate, "Bin", "QQ.exe")
+                if _check_exe(bin_exe):
+                    return qq_exe, debug_lines
 
     debug_lines.append("  [搜索] 所有策略均未找到 QQ.exe")
     return None, debug_lines
 
 
-def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None) -> subprocess.Popen:
+def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None, saved_qq_path: str = "") -> subprocess.Popen:
     """直接启动 NapCatWinBootMain.exe（shell=False，stdout 不会断）。
 
     复刻 launcher-user.bat 的逻辑：设环境变量、找 QQ.exe、启动。
@@ -157,7 +199,7 @@ def _launch_napcat_direct(launcher_exe: str, napcat_dir: str, log_cb=None) -> su
     _log(f"[调试] 启动器: {launcher_exe}")
     _log(f"[调试] NapCat 目录: {napcat_dir}")
 
-    qq_exe, qq_debug = _find_qq_exe()
+    qq_exe, qq_debug = _find_qq_exe(saved_path=saved_qq_path)
     for line in qq_debug:
         _log(line)
 
@@ -393,11 +435,12 @@ class NapCatManager:
     def napcat_root(self) -> str:
         return self._napcat_root
 
-    def start(self, qq: str = "") -> bool:
+    def start(self, qq: str = "", saved_qq_path: str = "") -> bool:
         """启动 NapCat 子进程。返回 True 表示进程已启动。
 
         Args:
             qq: 若不为空，传递给 NapCatWinBootMain.exe 实现免扫码快登
+            saved_qq_path: 手动指定的 QQ.exe 路径（来自 config.json qq_exe_path）
         """
         def _log(msg):
             self._state.napcat_status.emit(msg)
@@ -490,7 +533,7 @@ class NapCatManager:
                 )
             else:
                 # 直接启动 exe — stdout 不断，可正确跟踪进程
-                self._process = _launch_napcat_direct(launcher, napcat_dir, log_cb=_log)
+                self._process = _launch_napcat_direct(launcher, napcat_dir, log_cb=_log, saved_qq_path=saved_qq_path)
             _log(f"[调试] 子进程已启动, PID={self._process.pid}")
         except FileNotFoundError as e:
             _log(f"[调试] FileNotFoundError: {e}")

@@ -1515,7 +1515,8 @@ class MainWindow(QMainWindow):
 
         qq = getattr(self, "_pending_qq", "")
         self._napcat = NapCatManager(napcat_root)
-        if self._napcat.start(qq=qq):
+        saved_qq = self._config_mgr.config.qq_exe_path
+        if self._napcat.start(qq=qq, saved_qq_path=saved_qq):
             self._set_login_btn_mode("quick")
             if qq:
                 self.login_status_label.setText(f"状态: 正在快速登录 {qq}...")
@@ -1680,7 +1681,8 @@ class MainWindow(QMainWindow):
         self._config_mgr.save()
 
         self._napcat = NapCatManager(napcat_root)
-        if self._napcat.start(qq=qq):
+        saved_qq = self._config_mgr.config.qq_exe_path
+        if self._napcat.start(qq=qq, saved_qq_path=saved_qq):
             self._set_login_btn_mode("quick")
             self.login_status_label.setText(f"状态: 正在快速登录 {qq}...")
             self._login_retry_count = 0
@@ -1806,7 +1808,7 @@ class MainWindow(QMainWindow):
         napcat_root = self._config_mgr.config.napcat_path
         if napcat_root:
             self._napcat = NapCatManager(napcat_root)
-            if self._napcat.start():  # 不传 qq = 纯扫码
+            if self._napcat.start(saved_qq_path=self._config_mgr.config.qq_exe_path):  # 不传 qq = 纯扫码
                 self._set_login_btn_mode("quick")
                 self.login_status_label.setText("状态: 请扫码登录")
                 self._login_retry_count = 0
