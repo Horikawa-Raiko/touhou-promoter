@@ -108,14 +108,13 @@ def _find_qq_exe(saved_path: str = "") -> tuple:
                             i += 1
                         except OSError:
                             break
-                        if "QQ" not in subkey_name and "Tencent" not in subkey_name and "qq" not in subkey_name.lower():
-                            continue
+                        # 不预过滤子键名 — MSI安装的键名是GUID不包含QQ
                         try:
                             with winreg.OpenKey(base, subkey_name) as sk:
                                 dn, _ = winreg.QueryValueEx(sk, "DisplayName")
                         except OSError:
                             continue
-                        if "QQ" not in dn and "qq" not in dn.lower():
+                        if "QQ" not in dn and "qq" not in dn.lower() and "腾讯QQ" not in dn:
                             continue
                         debug_lines.append(f"  [注册表] 匹配: {hive_name}\\...\\{subkey_name} -> {dn}")
                         for val_name in ("UninstallString", "DisplayIcon", "InstallLocation"):
