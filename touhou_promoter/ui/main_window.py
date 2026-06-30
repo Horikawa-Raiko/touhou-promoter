@@ -1400,6 +1400,7 @@ class MainWindow(QMainWindow):
         """登录状态变化"""
         if online:
             self._quick_login_mode = False
+            self._quick_login_attempting = False
             self.login_status_label.setText("状态: 在线")
             self.status_online.setText("在线")
             self.status_qq.setText(f"QQ: {info}")
@@ -1411,7 +1412,12 @@ class MainWindow(QMainWindow):
             self.login_status_label.setText(f"状态: {info}")
             self.status_online.setText("离线")
             self.status_qq.setText("QQ: -")
-            # 保持当前按钮状态不变（可能是快登中/扫码中）
+            # 快登失败降级扫码后，重置标志位并补渲染内联快登按钮
+            if self._quick_login_attempting and "快速登录失败" in info:
+                self._quick_login_attempting = False
+                self._quick_login_mode = False
+                if self._quick_login_accounts and self._napcat and self._napcat.is_running() and self._onebot is None:
+                    self._render_inline_quick_login_buttons(self._quick_login_accounts)
 
     def _on_intersection_ready(self, joined_ids: set):
         """收到 bot 实际加入的群号集合"""
