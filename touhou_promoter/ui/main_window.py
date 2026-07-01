@@ -26,6 +26,8 @@ from touhou_promoter.ui.workers import SendWorker, RecallWorker
 from touhou_promoter.ui.settings_dialog import SettingsDialog
 from touhou_promoter.core.post_send_listener import PostSendListener
 from touhou_promoter.ui.listener_panel import ListenerPanel
+from touhou_promoter.core.update_checker import UpdateChecker, DEFAULT_SERVER
+from touhou_promoter.ui.add_group_dialog import AddGroupDialog
 
 
 class NapCatSetupWorker(QThread):
@@ -954,6 +956,9 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self._append_log(f"[CSV] 自动加载失败: {e}")
 
+        # 后台检查更新
+        self._check_updates()
+
         # 旧配置迁移：有 last_self_id 但 cached_accounts 为空 → 自动填充
         cached = self._config_mgr.config.cached_accounts
         if (not cached or not any(q for q, _ in cached)) and self._config_mgr.config.last_self_id:
@@ -1001,6 +1006,7 @@ class MainWindow(QMainWindow):
 
         file_menu = mb.addMenu("文件(&F)")
         file_menu.addAction("加载CSV...", self._on_load_csv)
+        file_menu.addAction("添加群聊(&A)...", self._on_add_group)
         file_menu.addAction("退出(&Q)", self.close)
 
         settings_menu = mb.addMenu("设置(&S)")
@@ -1929,6 +1935,105 @@ class MainWindow(QMainWindow):
         )
         self._send_worker.start()
 
+    # ---- 更新检查 ----
+    def _check_updates(self):
+        server = self._config_mgr.config.update_server or DEFAULT_SERVER
+        csv_path = self._config_mgr.config.csv_path
+        local_ver = self._config_mgr.config.csv_version
+        self._update_checker = UpdateChecker(server, csv_path, local_ver)
+        self._update_checker.finished.connect(self._on_update_result)
+        self._update_checker.start()
+
+    def _on_update_result(self, result: dict):
+        if result.get("error"):
+            self._append_log(f"[更新] {result['error']}")
+            return
+        if result.get("csv_updated"):
+            rows = result.get("csv_rows", 0)
+            self._config_mgr.config.csv_version = 1
+            self._config_mgr.save()
+            # 重新加载CSV
+            csv_path = self._config_mgr.config.csv_path
+            if csv_path and os.path.isfile(csv_path):
+                try:
+                    from touhou_promoter.core.csv_loader import load_groups
+                    records = load_groups(csv_path)
+                    self._csv_records = records
+                    self._csv_groups = {r.group_id for r in records}
+                    self._intersection = self._csv_groups & self._joined_groups
+                    self._refresh_group_tree()
+                    self._append_log(f"[更新] CSV已更新: {rows}行 → 本地{len(records)}条")
+                except Exception as e:
+                    self._append_log(f"[更新] CSV重新加载失败: {e}")
+        if result.get("app_update"):
+            self._append_log("[更新] 有新版App可下载，请到 GitHub Releases 查看")
+        if not result.get("csv_updated") and not result.get("app_update"):
+            pass  # 无更新，静默
+
+    # ---- 添加群聊 ----
+    def _on_add_group(self):
+        dlg = AddGroupDialog(self, server_url=self._config_mgr.config.update_server)
+        if dlg.exec() != AddGroupDialog.DialogCode.Accepted:
+            return
+        entry = dlg.result()
+        if not entry:
+            return
+
+        gid = entry["群号"]
+        csv_path = self._config_mgr.config.csv_path
+        if not csv_path or not os.path.isfile(csv_path):
+            QMessageBox.warning(self, "提示", "请先加载CSV文件")
+            return
+
+        # 检查是否已存在
+        if gid in self._csv_groups:
+            QMessageBox.warning(self, "提示", f"群号 {gid} 已在列表中，请勿重复添加")
+            return
+
+        # 追加到CSV
+        import csv as csv_module
+        with open(csv_path, "a", encoding="utf-8-sig", newline="") as f:
+            writer = csv_module.DictWriter(f, fieldnames=[
+                "大类", "地区/小类", "子类", "地点", "学校", "活动名",
+                "群号", "群名称", "说明",
+            ])
+            writer.writerow({
+                "大类": entry["大类"],
+                "地区/小类": entry["地区/小类"],
+                "子类": entry.get("子类", ""),
+                "地点": entry["地点"],
+                "学校": entry["学校"],
+                "活动名": entry["活动名"],
+                "群号": gid,
+                "群名称": entry["群名称"],
+                "说明": entry.get("说明", ""),
+            })
+
+        # 内存更新
+        from touhou_promoter.core.group_model import GroupRecord
+        self._csv_records.append(GroupRecord(
+            category=entry["大类"],
+            region=entry["地区/小类"],
+            subcategory=entry.get("子类", ""),
+            location=entry["地点"],
+            school=entry["学校"],
+            event_name=entry["活动名"],
+            group_id=gid,
+            group_name=entry["群名称"],
+            note=entry.get("说明", ""),
+        ))
+        self._csv_groups.add(gid)
+        self._intersection = self._csv_groups & self._joined_groups
+        self._refresh_group_tree()
+
+        log_msg = f"[添加群聊] {gid} = {entry['群名称']}"
+        pack_result = entry.get("_submit_success")
+        if pack_result is True:
+            log_msg += " — 已提交云端"
+        elif pack_result is False:
+            log_msg += f" — 云端提交失败: {entry.get('_submit_error', '')}"
+        self._append_log(log_msg)
+
     # ---- CSV ----
     def _on_load_csv(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -2775,15 +2880,31 @@ class MainWindow(QMainWindow):
             self._listener_panel.set_dark_mode(self._dark_mode)
 
     def _on_about(self):
-        QMessageBox.about(
-            self, "关于",
+        dlg = QDialog(self)
+        dlg.setWindowTitle("关于")
+        dlg.setMinimumWidth(420)
+        layout = QVBoxLayout(dlg)
+
+        label = QLabel(
             "东方Project一键宣发姬 v1.0\n\n"
             "基于NapCat + OneBot v11的QQ群发工具\n"
             "开发: 没灵感的鼓 & 没人管的鼓\n\n"
-            "东方幻想指南网站：https://fantasyguide.cn/"
-            "东方人人人网站: https://thtripeople.ren/"
-            
+            "东方幻想指南网站：https://fantasyguide.cn/\n"
+            "东方人人人网站：https://thtripeople.ren/\n"
+            "特别鸣谢：碎月红楼、健胃小石片、摸不着头脑、逸明，以及所有测试和反馈的朋友们\n\n"
         )
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label.setOpenExternalLinks(True)
+        layout.addWidget(label)
+
+        btn = QPushButton("确定")
+        btn.clicked.connect(dlg.accept)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn)
+        layout.addLayout(btn_layout)
+
+        dlg.exec()
 
     # ================================================================
     # 工具

@@ -19,6 +19,8 @@ a = Analysis(
         'websocket._socket',
         'websocket._url',
         'websocket._utils',
+        'touhou_promoter.core.update_checker',
+        'touhou_promoter.ui.add_group_dialog',
     ],
     hookspath=[],
     hooksconfig={},

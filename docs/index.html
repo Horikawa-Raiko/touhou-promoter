@@ -362,28 +362,40 @@
 </section>
 
 <section id="howto" class="container">
-  <h2 class="section-title">三步开始</h2>
-  <p class="section-sub">从下载到群发，三分钟搞定</p>
+  <h2 class="section-title">安装步骤</h2>
+  <p class="section-sub">从零开始，五分钟完成配置</p>
   <div class="steps">
     <div class="step">
       <div class="step-num">1</div>
-      <h4>下载安装 QQNT</h4>
-      <p>确保已安装 QQNT<br>（Electron 版 QQ）</p>
+      <h4>安装 QQNT</h4>
+      <p>下载官方推荐版本<br><a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe" style="color:var(--gold-light);font-size:12px;">QQ9.9.26.44343</a><br>安装后改掉 updater.exe</p>
     </div>
     <div class="step">
       <div class="step-num">2</div>
-      <h4>启动应用</h4>
-      <p>双击 exe，应用自动<br>下载配置 NapCat</p>
+      <h4>下载宣发姬</h4>
+      <p>从 GitHub Releases<br>下载最新 exe 到任意目录</p>
     </div>
     <div class="step">
       <div class="step-num">3</div>
-      <h4>扫码登录</h4>
-      <p>手机 QQ 扫码<br>Bot 自动上线</p>
+      <h4>首次启动</h4>
+      <p>双击 exe，程序自动<br>下载 NapCat（~30MB）</p>
     </div>
     <div class="step">
       <div class="step-num">4</div>
-      <h4>选择群 → 发送</h4>
-      <p>勾选目标群，编辑消息<br>点击发送完成宣发</p>
+      <h4>扫码登录</h4>
+      <p>手机 QQ 扫码确认<br>Bot 账号自动上线</p>
+    </div>
+  </div>
+  <div class="steps" style="margin-top:24px; grid-template-columns: repeat(2, 1fr); max-width:480px; margin-left:auto; margin-right:auto;">
+    <div class="step">
+      <div class="step-num">5</div>
+      <h4>加载群列表</h4>
+      <p>程序自动加载内置 1800+ 群<br>也可通过菜单加载自己的 CSV</p>
+    </div>
+    <div class="step">
+      <div class="step-num">6</div>
+      <h4>勾选 → 发送</h4>
+      <p>勾选目标群，编辑消息<br>点击发送即完成宣发</p>
     </div>
   </div>
 </section>
@@ -416,33 +428,17 @@
       <div class="faq-a">
         <p>你装的可能是<b>旧版 Win32 QQ</b>，NapCat 只支持 <b>QQNT</b>（Electron 架构的新版 QQ）。</p>
         <p>到 <a href="https://im.qq.com">im.qq.com</a> 下载"全新架构版"，安装后再试。</p>
-        <p>如果已确认是 QQNT 仍然报错：你可能是从 D 盘迁移或卸载重装过，注册表留下了旧路径但实际文件已不存在。在设置里手动指定 QQNT 安装目录即可。</p>
+        <p>宣发姬会自动扫描 C/D/E 等所有盘符下的 QQNT 安装位置，无需手动指定路径。</p>
       </div>
     </div>
 
     <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> QQ 版本太新，Worker 反复崩溃</div>
+      <div class="faq-q"><span class="q-mark">Q</span> QQ 版本太新或太旧，Worker 反复崩溃</div>
       <div class="faq-a">
-        <p>QQNT 自动更新推的版本可能超出 NapCat 的兼容范围。</p>
-        <p>安装 NapCat 官方<b>推荐版本</b>：<code>QQ9.9.26.44343_x64.exe</code></p>
-        <p>下载地址：<a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe">https://dldir1.qq.com/qqfile/qq/QQNT/...</a></p>
-        <p><b>安装后务必阻止 QQNT 自动更新：</b>到 QQNT 安装目录下，把 <code>updater.exe</code> 改名（如 <code>updater.exe.bak</code>），否则过两天又被自动升级回去。</p>
-      </div>
-    </div>
-
-    <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> QQNT 版本太旧被拒绝</div>
-      <div class="faq-a">
-        <p>QQNT build 号过低（一般从旧安装包或第三方下载站获取）。</p>
-        <p>到 <a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe">这里</a> 下载官方推荐版本重新安装。</p>
-      </div>
-    </div>
-
-    <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> QQ 装在 D 盘或自定义路径找不到</div>
-      <div class="faq-a">
-        <p>QQNT 装在非标准路径（如 <code>D:\QQ\</code>、<code>E:\D盘迁移\Program Files(x86)\Tencent\QQNT\</code>）时可能搜不到。</p>
-        <p>在设置中<b>手动指定 QQNT 安装目录</b>即可。指定目录就行，不用精确到 QQ.exe，程序会自动扫描版本子目录。</p>
+        <p>QQNT 自动更新可能推出版本超出 NapCat 兼容范围。过旧的安装包同理。</p>
+        <p><b>统一解决方案：安装 NapCat 官方推荐版本</b></p>
+        <p><a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe" style="color:var(--gold-light);font-weight:700;">QQ9.9.26.44343_x64.exe</a></p>
+        <p><b>安装后务必阻止 QQNT 自动更新：</b>到 QQNT 安装目录下，把 <code>updater.exe</code> 改名（如 <code>updater.exe.bak</code>），否则过两天又会被自动升级。</p>
       </div>
     </div>
 
