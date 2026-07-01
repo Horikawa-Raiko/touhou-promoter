@@ -2034,12 +2034,64 @@ class MainWindow(QMainWindow):
         self._refresh_group_tree()
 
         log_msg = f"[添加群聊] {gid} = {entry['群名称']}"
-        pack_result = entry.get("_submit_success")
-        if pack_result is True:
-            log_msg += " — 已提交云端"
-        elif pack_result is False:
-            log_msg += f" — 云端提交失败: {entry.get('_submit_error', '')}"
+
+        # 云端提交 — 在本地去重之后执行
+        if entry.get("_submit") == "cloud":
+            server = self._config_mgr.config.update_server
+            if server:
+                self._append_log(f"[添加群聊] 正在提交云端...")
+                QTimer.singleShot(0, lambda: self._submit_to_cloud(entry, gid, log_msg))
+                return
+
         self._append_log(log_msg)
+
+    def _submit_to_cloud(self, entry: dict, gid: str, log_prefix: str):
+        """在后台线程中提交云端，避免阻塞 UI"""
+        from urllib.request import urlopen, Request
+        from urllib.error import URLError
+        import json as json_mod
+
+        class CloudSubmitWorker(QThread):
+            result_ready = pyqtSignal(bool, str)
+
+            def run(self):
+                try:
+                    payload = json_mod.dumps({
+                        "secret": "raiko-touhou-2026",
+                        "entry": {k: v for k, v in entry.items()
+                                  if not k.startswith("_") and k in (
+                                      "群号", "群名称", "大类", "地区/小类", "子类",
+                                      "地点", "学校", "活动名", "说明",
+                                  )},
+                    }, ensure_ascii=False).encode("utf-8")
+                    req = Request(
+                        f"{server}/api/submit",
+                        data=payload,
+                        headers={
+                            "Content-Type": "application/json; charset=utf-8",
+                            "User-Agent": "TouhouPromoter/1.0",
+                        },
+                    )
+                    with urlopen(req, timeout=15) as resp:
+                        data = json_mod.loads(resp.read().decode("utf-8"))
+                    if data.get("ok"):
+                        self.result_ready.emit(True, "")
+                    else:
+                        self.result_ready.emit(False, data.get("error", "未知错误"))
+                except URLError as e:
+                    self.result_ready.emit(False, f"网络错误: {e.reason}")
+                except Exception as e:
+                    self.result_ready.emit(False, str(e))
+
+        server = self._config_mgr.config.update_server
+        self._cloud_worker = CloudSubmitWorker()
+        self._cloud_worker.result_ready.connect(
+            lambda ok, err: self._append_log(
+                f"{log_prefix} — 已提交云端" if ok
+                else f"{log_prefix} — 云端提交失败: {err}"
+            )
+        )
+        self._cloud_worker.start()
 
     # ---- CSV ----
     def _on_load_csv(self):

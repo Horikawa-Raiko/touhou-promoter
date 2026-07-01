@@ -1,13 +1,10 @@
-"""添加群聊对话框 — 可视化表单，支持本地保存 + 云端提交"""
+"""添加群聊对话框 — 可视化表单，纯 UI 层，不涉及网络"""
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QComboBox, QPushButton, QLabel, QMessageBox,
     QGroupBox,
 )
 from PyQt6.QtCore import Qt
-import json
-from urllib.request import urlopen, Request
-from urllib.error import URLError
 
 
 CATEGORIES = [
@@ -18,8 +15,6 @@ CATEGORIES = [
     "组织实体官方群",
     "网络区域社群",
 ]
-
-SUBMIT_SECRET = "raiko-touhou-2026"
 
 
 class AddGroupDialog(QDialog):
@@ -137,39 +132,8 @@ class AddGroupDialog(QDialog):
     def _add_and_submit(self):
         if not self._validate():
             return
-        entry = self._build_entry()
-        # 先设本地结果
-        self._result_entry = entry
+        self._result_entry = self._build_entry()
         self._result_entry["_submit"] = "cloud"
-
-        if self._server:
-            try:
-                payload = json.dumps({
-                    "secret": SUBMIT_SECRET,
-                    "entry": entry,
-                }, ensure_ascii=False).encode("utf-8")
-                req = Request(
-                    f"{self._server}/api/submit",
-                    data=payload,
-                    headers={
-                        "Content-Type": "application/json; charset=utf-8",
-                        "User-Agent": "TouhouPromoter/1.0",
-                    },
-                )
-                with urlopen(req, timeout=15) as resp:
-                    resp_data = json.loads(resp.read().decode("utf-8"))
-                if resp_data.get("ok"):
-                    self._result_entry["_submit_success"] = True
-                else:
-                    self._result_entry["_submit_success"] = False
-                    self._result_entry["_submit_error"] = resp_data.get("error", "未知错误")
-            except URLError as e:
-                self._result_entry["_submit_success"] = False
-                self._result_entry["_submit_error"] = f"网络错误: {e.reason}"
-            except Exception as e:
-                self._result_entry["_submit_success"] = False
-                self._result_entry["_submit_error"] = str(e)
-
         self.accept()
 
     def result(self) -> dict | None:
