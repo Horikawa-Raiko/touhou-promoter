@@ -1985,57 +1985,12 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "请先加载CSV文件")
             return
 
-        # 本地去重
+        # 本地去重 — 这是唯一有效的审查
         if gid in self._csv_groups:
             QMessageBox.warning(self, "提示", f"群号 {gid} 已在列表中，请勿重复添加")
             return
 
-        # 如果有 OneBot 连接 → 验证群是否存在
-        if self._onebot:
-            self._append_log(f"[添加群聊] 正在验证群 {gid} 是否存在...")
-            self._add_group_entry = entry
-            self._add_group_worker = GroupDetailWorker(
-                self._onebot, gid, entry["群名称"]
-            )
-            self._add_group_worker.finished.connect(self._on_add_group_verified)
-            self._add_group_worker.failed.connect(self._on_add_group_verify_failed)
-            self._add_group_worker.start()
-        else:
-            # 未登录 → 提醒但允许添加
-            reply = QMessageBox.question(
-                self, "未登录",
-                "当前未连接 OneBot，无法验证群是否存在。\n\n确定要添加吗？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self._do_add_group(entry)
-
-    def _on_add_group_verified(self, gid: str, name: str, info: dict):
-        """NapCat 确认群存在 → 直接添加"""
-        self._append_log(f"[添加群聊] 群 {gid} 验证通过 — {info.get('group_name', name)}")
-        self._do_add_group(self._add_group_entry)
-        self._add_group_entry = None
-
-    def _on_add_group_verify_failed(self, error: str):
-        """NapCat 无法获取群信息 → 警告但允许继续"""
-        entry = self._add_group_entry
-        self._add_group_entry = None
-        gid = entry["群号"]
-        self._append_log(f"[添加群聊] 群 {gid} 验证失败: {error}")
-        reply = QMessageBox.question(
-            self, "无法验证",
-            f"无法确认群 {gid} 是否存在。\n\n"
-            f"可能原因：Bot 不在该群内、群号错误、或网络问题。\n"
-            f"错误详情: {error}\n\n"
-            f"仍然添加到列表？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self._do_add_group(entry)
-        else:
-            self._append_log(f"[添加群聊] 已取消: {gid}")
+        self._do_add_group(entry)
 
     def _do_add_group(self, entry: dict):
         """执行实际添加：写CSV + 更新内存 + 可选云端提交"""
