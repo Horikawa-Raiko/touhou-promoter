@@ -30,7 +30,7 @@ class SettingsDialog(QDialog):
 
         self._onebot_mode = QComboBox()
         self._onebot_mode.addItem("程序管理 NapCat 进程 (Windows 推荐)", "managed")
-        self._onebot_mode.addItem("连接外部 OneBot 服务 (Mac/Linux 推荐)", "external")
+        self._onebot_mode.addItem("连接外部 OneBot 服务 (Mac/Linux — 暂未支持)", "external")
         self._onebot_mode.currentIndexChanged.connect(self._on_mode_changed)
         conn_form.addRow("连接模式:", self._onebot_mode)
 
@@ -40,6 +40,17 @@ class SettingsDialog(QDialog):
         conn_form.addRow("API 地址:", self._onebot_url)
 
         layout.addWidget(conn_group)
+
+        # -- 云同步 --
+        cloud_group = QGroupBox("云端同步")
+        cloud_form = QFormLayout(cloud_group)
+
+        self._update_server = QLineEdit()
+        self._update_server.setPlaceholderText("http://152.136.232.146")
+        self._update_server.setToolTip("更新服务器地址，用于自动同步群列表和提交新群")
+        cloud_form.addRow("服务器:", self._update_server)
+
+        layout.addWidget(cloud_group)
 
         # -- 发送参数 --
         send_group = QGroupBox("发送参数")
@@ -114,6 +125,8 @@ class SettingsDialog(QDialog):
         self._onebot_url.setText(getattr(c, "onebot_http_url", "http://127.0.0.1:5700"))
         self._onebot_url.setEnabled(mode == "external")
 
+        self._update_server.setText(getattr(c, "update_server", "http://152.136.232.146"))
+
         self._send_interval.setValue(c.send_interval)
         self._send_jitter.setValue(c.send_interval_jitter)
         self._batch_every.setValue(c.batch_pause_every)
@@ -125,6 +138,7 @@ class SettingsDialog(QDialog):
         c = self._config_mgr.config
         c.onebot_mode = self._onebot_mode.currentData()
         c.onebot_http_url = self._onebot_url.text().strip() or "http://127.0.0.1:5700"
+        c.update_server = self._update_server.text().strip() or "http://152.136.232.146"
         c.send_interval = self._send_interval.value()
         c.send_interval_jitter = self._send_jitter.value()
         c.batch_pause_every = self._batch_every.value()
