@@ -1938,9 +1938,8 @@ class MainWindow(QMainWindow):
     # ---- 更新检查 ----
     def _check_updates(self):
         server = self._config_mgr.config.update_server or DEFAULT_SERVER
-        csv_path = self._config_mgr.config.csv_path
-        local_ver = self._config_mgr.config.csv_version
-        self._update_checker = UpdateChecker(server, csv_path, local_ver)
+        local_seq = self._config_mgr.config.last_synced_seq
+        self._update_checker = UpdateChecker(server, local_seq)
         self._update_checker.finished.connect(self._on_update_result)
         self._update_checker.start()
 
@@ -1948,27 +1947,74 @@ class MainWindow(QMainWindow):
         if result.get("error"):
             self._append_log(f"[更新] {result['error']}")
             return
-        if result.get("csv_updated"):
-            rows = result.get("csv_rows", 0)
-            self._config_mgr.config.csv_version = 1
+
+        changes = result.get("changes", [])
+        latest_seq = result.get("latest_seq", self._config_mgr.config.last_synced_seq)
+
+        if not changes:
+            return  # 无增量，静默
+
+        csv_path = self._config_mgr.config.csv_path
+        if not csv_path or not os.path.isfile(csv_path):
+            self._append_log("[更新] 未找到本地CSV，跳过增量合并")
+            return
+
+        try:
+            import csv as csv_module
+
+            # 读取现有CSV全部行
+            with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
+                reader = csv_module.DictReader(f)
+                fieldnames = reader.fieldnames
+                existing = list(reader)
+
+            # 建立 gid -> 行索引 映射
+            gid_to_idx = {}
+            for i, row in enumerate(existing):
+                gid = row.get("群号", "").strip()
+                if gid:
+                    gid_to_idx[gid] = i
+
+            added = 0
+            updated = 0
+
+            for entry in changes:
+                gid = entry.get("群号", "").strip()
+                if not gid:
+                    continue
+                row_data = {k: entry.get(k, "") for k in (fieldnames or []) if k != "seq"}
+                if gid in gid_to_idx:
+                    existing[gid_to_idx[gid]] = row_data
+                    updated += 1
+                else:
+                    existing.append(row_data)
+                    gid_to_idx[gid] = len(existing) - 1
+                    added += 1
+
+            # 写回CSV
+            with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
+                writer = csv_module.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(existing)
+
+            # 更新本地 seq
+            self._config_mgr.config.last_synced_seq = latest_seq
             self._config_mgr.save()
-            # 重新加载CSV
-            csv_path = self._config_mgr.config.csv_path
-            if csv_path and os.path.isfile(csv_path):
-                try:
-                    from touhou_promoter.core.csv_loader import load_groups
-                    records = load_groups(csv_path)
-                    self._csv_records = records
-                    self._csv_groups = {r.group_id for r in records}
-                    self._intersection = self._csv_groups & self._joined_groups
-                    self._refresh_group_tree()
-                    self._append_log(f"[更新] CSV已更新: {rows}行 → 本地{len(records)}条")
-                except Exception as e:
-                    self._append_log(f"[更新] CSV重新加载失败: {e}")
-        if result.get("app_update"):
-            self._append_log("[更新] 有新版App可下载，请到 GitHub Releases 查看")
-        if not result.get("csv_updated") and not result.get("app_update"):
-            pass  # 无更新，静默
+
+            # 重新加载
+            from touhou_promoter.core.csv_loader import load_groups
+            records = load_groups(csv_path)
+            self._csv_records = records
+            self._csv_groups = {r.group_id for r in records}
+            self._intersection = self._csv_groups & self._joined_groups
+            self._refresh_group_tree()
+            self._append_log(
+                f"[更新] 增量同步完成: +{added}条新增 / {updated}条更新, "
+                f"本地seq={latest_seq}, 共{len(records)}条记录"
+            )
+
+        except Exception as e:
+            self._append_log(f"[更新] 增量合并失败: {e}")
 
     # ---- 添加群聊 ----
     def _on_add_group(self):

@@ -27,7 +27,7 @@ class AppConfig:
     qq_exe_path: str = ""                    # 手动指定的 QQ.exe 路径（自动搜索失败时的回退）
     # 云端同步
     update_server: str = "http://152.136.232.146"  # 更新服务器地址
-    csv_version: int = 0                     # 本地记录的 csv_version，用于增量更新
+    last_synced_seq: int = 0                 # 本地已同步的最新 changelog seq，用于增量更新
 
 
 class ConfigManager:
