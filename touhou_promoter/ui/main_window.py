@@ -1972,7 +1972,9 @@ class MainWindow(QMainWindow):
 
     # ---- 添加群聊 ----
     def _on_add_group(self):
-        dlg = AddGroupDialog(self, server_url=self._config_mgr.config.update_server)
+        existing = {r.group_id: r.group_name for r in self._csv_records}
+        dlg = AddGroupDialog(self, server_url=self._config_mgr.config.update_server,
+                             existing_groups=existing)
         if dlg.exec() != AddGroupDialog.DialogCode.Accepted:
             return
         entry = dlg.result()
@@ -2950,7 +2952,7 @@ class MainWindow(QMainWindow):
             "开发: 没灵感的鼓 & 没人管的鼓\n\n"
             "东方幻想指南网站：https://fantasyguide.cn/\n"
             "东方人人人网站：https://thtripeople.ren/\n"
-            "特别鸣谢：碎月红楼、健胃小石片、摸不着头脑、逸明，以及所有测试和反馈的朋友们\n\n"
+            "特别鸣谢：碎月红楼、健胃小石片、摸不着头脑、逸明、上海龙教练，以及所有测试和反馈的朋友们\n\n"
         )
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         label.setOpenExternalLinks(True)
