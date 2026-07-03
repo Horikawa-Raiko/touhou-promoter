@@ -1,16 +1,20 @@
 """主窗口 — QSplitter左右布局，集成登录/群列表/消息编辑/发送控制/日志"""
+import hashlib
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from datetime import datetime
+
+import requests
 
 from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTreeWidget, QTreeWidgetItem, QTextEdit, QPushButton,
     QProgressBar, QPlainTextEdit, QStatusBar, QMessageBox, QGroupBox,
     QFileDialog, QScrollArea, QLineEdit, QMenu, QApplication, QDialog, QFrame,
-    QHeaderView,
+    QHeaderView, QProgressDialog,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QIcon
@@ -28,6 +32,7 @@ from touhou_promoter.core.post_send_listener import PostSendListener
 from touhou_promoter.ui.listener_panel import ListenerPanel
 from touhou_promoter.core.update_checker import UpdateChecker, DEFAULT_SERVER
 from touhou_promoter.ui.add_group_dialog import AddGroupDialog
+from touhou_promoter.version import APP_VERSION
 
 
 class NapCatSetupWorker(QThread):
@@ -916,6 +921,7 @@ class MainWindow(QMainWindow):
         self._external_poll_timer: QTimer | None = None
         self._quick_login_accounts: list = []     # 缓存的快登账号
         self._quick_login_attempting = False    # 是否正在尝试快速登录
+        self._pending_update: dict | None = None  # 待处理的app更新信息
         self._quick_login_mode = False          # 当前启动是否为快登模式（区分扫码/快登的QQ窗口提示）
 
         self._log_entries: list[tuple[str, str, str]] = []  # [(msg, level, timestamp), ...]
@@ -955,6 +961,9 @@ class MainWindow(QMainWindow):
                 self._append_log(f"[CSV] 自动加载: {len(records)} 条记录, {len(self._csv_groups)} 个唯一群号")
             except Exception as e:
                 self._append_log(f"[CSV] 自动加载失败: {e}")
+
+        # 确保 updater.exe 存在
+        self._ensure_updater()
 
         # 后台检查更新
         self._check_updates()
@@ -1017,6 +1026,7 @@ class MainWindow(QMainWindow):
         self._theme_action = settings_menu.addAction(theme_label, self._on_toggle_theme)
 
         help_menu = mb.addMenu("帮助(&H)")
+        help_menu.addAction("检查更新(&U)...", self._on_check_app_update)
         help_menu.addAction("关于...", self._on_about)
 
     # ================================================================
@@ -1946,75 +1956,184 @@ class MainWindow(QMainWindow):
     def _on_update_result(self, result: dict):
         if result.get("error"):
             self._append_log(f"[更新] {result['error']}")
+            # 即使CSV同步失败，仍检查是否有app版本更新
+            app_update = result.get("app_update")
+        else:
+            app_update = result.get("app_update")
+            changes = result.get("changes", [])
+            latest_seq = result.get("latest_seq", self._config_mgr.config.last_synced_seq)
+
+            if changes:
+                csv_path = self._config_mgr.config.csv_path
+                if not csv_path or not os.path.isfile(csv_path):
+                    self._append_log("[更新] 未找到本地CSV，跳过增量合并")
+                else:
+                    try:
+                        import csv as csv_module
+
+                        with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
+                            reader = csv_module.DictReader(f)
+                            fieldnames = reader.fieldnames
+                            existing = list(reader)
+
+                        gid_to_idx = {}
+                        for i, row in enumerate(existing):
+                            gid = row.get("群号", "").strip()
+                            if gid:
+                                gid_to_idx[gid] = i
+
+                        added = 0
+                        updated = 0
+
+                        for entry in changes:
+                            gid = entry.get("群号", "").strip()
+                            if not gid:
+                                continue
+                            row_data = {k: entry.get(k, "") for k in (fieldnames or []) if k != "seq"}
+                            if gid in gid_to_idx:
+                                existing[gid_to_idx[gid]] = row_data
+                                updated += 1
+                            else:
+                                existing.append(row_data)
+                                gid_to_idx[gid] = len(existing) - 1
+                                added += 1
+
+                        with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
+                            writer = csv_module.DictWriter(f, fieldnames=fieldnames)
+                            writer.writeheader()
+                            writer.writerows(existing)
+
+                        self._config_mgr.config.last_synced_seq = latest_seq
+                        self._config_mgr.save()
+
+                        from touhou_promoter.core.csv_loader import load_groups
+                        records = load_groups(csv_path)
+                        self._csv_records = records
+                        self._csv_groups = {r.group_id for r in records}
+                        self._intersection = self._csv_groups & self._joined_groups
+                        self._refresh_group_tree()
+                        self._append_log(
+                            f"[更新] 增量同步完成: +{added}条新增 / {updated}条更新, "
+                            f"本地seq={latest_seq}, 共{len(records)}条记录"
+                        )
+                    except Exception as e:
+                        self._append_log(f"[更新] 增量合并失败: {e}")
+
+        # ── 应用版本更新通知 ──
+        if app_update:
+            new_ver = app_update["version"]
+            self._pending_update = app_update
+            self._append_log(f"[更新] 发现新版本 v{new_ver}，当前 v{APP_VERSION}，请到 帮助→检查更新 下载")
+
+    # ── 应用更新 ──
+
+    def _ensure_updater(self):
+        """首次启动时从捆绑资源中提取 updater.exe 到 %APPDATA%"""
+        dest_dir = os.path.join(self._config_mgr.DIR, "updater")
+        dest = os.path.join(dest_dir, "updater.exe")
+        if os.path.exists(dest):
+            return
+        os.makedirs(dest_dir, exist_ok=True)
+        # PyInstaller onefile 模式下资源在 sys._MEIPASS（绝对路径）
+        if hasattr(sys, "_MEIPASS"):
+            src = os.path.join(sys._MEIPASS, "touhou_promoter", "assets", "updater.exe")
+        else:
+            # 开发模式：相对于 main_window.py 所在目录
+            src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "updater.exe")
+        if os.path.isfile(src):
+            shutil.copy2(src, dest)
+
+    def _on_check_app_update(self):
+        """手动检查应用更新（菜单触发）"""
+        updates = self._pending_update
+        if not updates:
+            QMessageBox.information(self, "检查更新", f"已是最新版本 v{APP_VERSION}")
             return
 
-        changes = result.get("changes", [])
-        latest_seq = result.get("latest_seq", self._config_mgr.config.last_synced_seq)
-
-        if not changes:
-            return  # 无增量，静默
-
-        csv_path = self._config_mgr.config.csv_path
-        if not csv_path or not os.path.isfile(csv_path):
-            self._append_log("[更新] 未找到本地CSV，跳过增量合并")
+        new_ver = updates["version"]
+        dl_url = updates.get("download_url", "")
+        if not dl_url:
+            QMessageBox.warning(self, "检查更新", f"发现新版本 v{new_ver}，但下载地址不可用")
             return
+
+        answer = QMessageBox.question(
+            self, "发现新版本",
+            f"当前版本: v{APP_VERSION}\n最新版本: v{new_ver}\n\n是否立即下载更新？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        dest_dir = os.path.join(self._config_mgr.DIR, "updater")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, "东方Project一键宣发姬.exe")
+
+        progress = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
+        progress.setWindowTitle("更新下载")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.show()
 
         try:
-            import csv as csv_module
+            resp = requests.get(dl_url, stream=True, timeout=60)
+            resp.raise_for_status()
+            total = int(resp.headers.get("content-length", 0))
+            done = 0
+            with open(dest, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if progress.wasCanceled():
+                        f.close()
+                        try:
+                            os.remove(dest)
+                        except OSError:
+                            pass
+                        return
+                    f.write(chunk)
+                    done += len(chunk)
+                    if total:
+                        pct = int(done / total * 100)
+                        progress.setValue(pct)
+                        progress.setLabelText(f"正在下载更新... {done // 1048576}MB / {total // 1048576}MB")
+                    QApplication.processEvents()
 
-            # 读取现有CSV全部行
-            with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
-                reader = csv_module.DictReader(f)
-                fieldnames = reader.fieldnames
-                existing = list(reader)
+            progress.setValue(100)
 
-            # 建立 gid -> 行索引 映射
-            gid_to_idx = {}
-            for i, row in enumerate(existing):
-                gid = row.get("群号", "").strip()
-                if gid:
-                    gid_to_idx[gid] = i
+            # SHA256 完整性校验
+            expected = updates.get("sha256", "")
+            if expected:
+                progress.setLabelText("正在校验文件完整性...")
+                QApplication.processEvents()
+                actual = hashlib.sha256()
+                with open(dest, "rb") as f:
+                    for chunk in iter(lambda: f.read(65536), b""):
+                        actual.update(chunk)
+                if actual.hexdigest() != expected:
+                    progress.close()
+                    try:
+                        os.remove(dest)
+                    except OSError:
+                        pass
+                    QMessageBox.warning(self, "下载失败", "文件完整性校验失败，请稍后重试")
+                    return
 
-            added = 0
-            updated = 0
+            self._ensure_updater()
 
-            for entry in changes:
-                gid = entry.get("群号", "").strip()
-                if not gid:
-                    continue
-                row_data = {k: entry.get(k, "") for k in (fieldnames or []) if k != "seq"}
-                if gid in gid_to_idx:
-                    existing[gid_to_idx[gid]] = row_data
-                    updated += 1
-                else:
-                    existing.append(row_data)
-                    gid_to_idx[gid] = len(existing) - 1
-                    added += 1
+            updater_exe = os.path.join(self._config_mgr.DIR, "updater", "updater.exe")
+            if not os.path.isfile(updater_exe):
+                QMessageBox.warning(self, "更新失败", "找不到 updater.exe，请重新下载安装包")
+                return
 
-            # 写回CSV
-            with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
-                writer = csv_module.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(existing)
-
-            # 更新本地 seq
-            self._config_mgr.config.last_synced_seq = latest_seq
-            self._config_mgr.save()
-
-            # 重新加载
-            from touhou_promoter.core.csv_loader import load_groups
-            records = load_groups(csv_path)
-            self._csv_records = records
-            self._csv_groups = {r.group_id for r in records}
-            self._intersection = self._csv_groups & self._joined_groups
-            self._refresh_group_tree()
-            self._append_log(
-                f"[更新] 增量同步完成: +{added}条新增 / {updated}条更新, "
-                f"本地seq={latest_seq}, 共{len(records)}条记录"
+            old_exe = sys.executable
+            subprocess.Popen(
+                [updater_exe, f"{old_exe}|{dest}"],
+                creationflags=subprocess.DETACHED_PROCESS,
             )
+            QApplication.quit()
 
         except Exception as e:
-            self._append_log(f"[更新] 增量合并失败: {e}")
+            progress.close()
+            QMessageBox.warning(self, "下载失败", f"下载更新失败: {e}")
 
     # ---- 添加群聊 ----
     def _on_add_group(self):
@@ -2993,7 +3112,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(dlg)
 
         label = QLabel(
-            "东方Project一键宣发姬 v1.0\n\n"
+            f"东方Project一键宣发姬 v{APP_VERSION}\n\n"
             "基于NapCat + OneBot v11的QQ群发工具\n"
             "开发: 没灵感的鼓 & 没人管的鼓\n\n"
             "东方幻想指南网站：https://fantasyguide.cn/\n"

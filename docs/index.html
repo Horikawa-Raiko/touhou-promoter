@@ -31,7 +31,7 @@
     overflow-x: hidden;
   }
 
-  /* ── Decorative background ── */
+  /* Decorative background */
   body::before {
     content: '';
     position: fixed;
@@ -53,7 +53,7 @@
     z-index: 1;
   }
 
-  /* ── Header ── */
+  /* Header */
   header {
     text-align: center;
     padding: 80px 0 60px;
@@ -91,7 +91,7 @@
     margin: 0 auto 36px;
   }
 
-  /* ── Buttons ── */
+  /* Buttons */
   .btn-row { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
   .btn {
     display: inline-flex; align-items: center; gap: 8px;
@@ -124,7 +124,7 @@
   .btn-lg { padding: 18px 48px; font-size: 18px; border-radius: 12px; }
   .btn .icon { font-size: 20px; }
 
-  /* ── Sections ── */
+  /* Sections */
   section { padding: 80px 0; }
   .section-title {
     text-align: center;
@@ -140,10 +140,10 @@
     font-size: 15px;
   }
 
-  /* ── Feature Cards ── */
+  /* Feature Cards */
   .features {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 24px;
   }
   .feature-card {
@@ -175,7 +175,7 @@
     line-height: 1.7;
   }
 
-  /* ── Steps ── */
+  /* Steps */
   .steps {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -217,7 +217,7 @@
   }
   .step:last-child::after { display: none; }
 
-  /* ── Download Section ── */
+  /* Download Section */
   .download-section {
     text-align: center;
     padding: 60px 0 40px;
@@ -245,7 +245,7 @@
   }
   .requirements strong { color: var(--text); }
 
-  /* ── Footer ── */
+  /* Footer */
   footer {
     text-align: center;
     padding: 48px 0;
@@ -256,7 +256,7 @@
   footer a:hover { text-decoration: underline; }
   footer .links { display: flex; gap: 24px; justify-content: center; margin-bottom: 12px; }
 
-  /* ── Dividers ── */
+  /* Dividers */
   .divider {
     text-align: center;
     color: var(--gold);
@@ -266,7 +266,7 @@
     opacity: 0.5;
   }
 
-  /* ── FAQ ── */
+  /* FAQ */
   .faq-list { max-width: 760px; margin: 0 auto; }
   .faq-item {
     background: var(--bg-card);
@@ -301,7 +301,20 @@
   }
   .faq-a a { color: var(--gold-light); }
 
-  /* ── Responsive ── */
+  /* Disclaimer */
+  .disclaimer {
+    margin-top: 32px;
+    padding: 16px 20px;
+    background: rgba(192,64,64,0.08);
+    border: 1px solid rgba(192,64,64,0.2);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.8;
+    text-align: center;
+  }
+
+  /* Responsive */
   @media (max-width: 768px) {
     header { padding: 48px 0 36px; }
     header h1 { font-size: 32px; }
@@ -320,7 +333,7 @@
 <body>
 
 <header class="container">
-  <span class="app-icon">⛩️</span>
+  <span class="app-icon">&#x26E9;&#xFE0F;</span>
   <span class="badge">Touhou Project</span>
   <h1>东方Project<span class="accent">一键宣发姬</span></h1>
   <p class="subtitle">
@@ -328,35 +341,40 @@
     扫码即用，一键触达 1800+ 东方群
   </p>
   <div class="btn-row">
-    <a href="https://github.com/Horikawa-Raiko/touhou-promoter/releases" class="btn btn-primary btn-lg">
-      <span class="icon">⬇</span> 下载 Windows 版
+    <a href="https://s3.bitiful.net/raiko/download/%E4%B8%9C%E6%96%B9Project%E4%B8%80%E9%94%AE%E5%AE%A3%E5%8F%91%E5%A7%AC.exe" class="btn btn-primary btn-lg">
+      <span class="icon">&#x2B07;</span> 下载 Windows 版
     </a>
     <a href="https://github.com/Horikawa-Raiko/touhou-promoter" class="btn btn-secondary">
-      <span class="icon">⌂</span> GitHub
+      <span class="icon">&#x2302;</span> GitHub
     </a>
   </div>
 </header>
 
-<div class="divider container">◆ ◆ ◆</div>
+<div class="divider container">&#x25C6; &#x25C6; &#x25C6;</div>
 
 <section id="features" class="container">
   <h2 class="section-title">核心功能</h2>
   <p class="section-sub">专为东方宣发场景设计，简化一切复杂操作</p>
   <div class="features">
     <div class="feature-card">
-      <span class="icon">📱</span>
+      <span class="icon">&#x1F4F1;</span>
       <h3>扫码即用</h3>
-      <p>微信扫一扫登录 QQ Bot，全程无需输入密码。支持多账号缓存，再次启动秒登。</p>
+      <p>扫一扫登录 QQ Bot，全程无需输入密码。支持多账号缓存，再次启动秒登。</p>
     </div>
     <div class="feature-card">
-      <span class="icon">⚡</span>
+      <span class="icon">&#x26A1;</span>
       <h3>批量群发</h3>
       <p>内置 1800+ 东方群，按分类筛选目标群。智能限速防风控，支持断点续传和秒级撤回。</p>
     </div>
     <div class="feature-card">
-      <span class="icon">👂</span>
+      <span class="icon">&#x1F442;</span>
       <h3>智能监听</h3>
       <p>群发后自动监听 @Bot 消息和关键词回复，QQ 气泡风格面板，一键快速回复咨询。</p>
+    </div>
+    <div class="feature-card">
+      <span class="icon">&#x1F504;</span>
+      <h3>持续更新</h3>
+      <p>群列表类 Git 维护，启动自动增量同步最新数据。软件内置自动更新，有新版本一键下载升级。</p>
     </div>
   </div>
 </section>
@@ -367,13 +385,13 @@
   <div class="steps">
     <div class="step">
       <div class="step-num">1</div>
-      <h4>安装 QQNT</h4>
-      <p>下载官方推荐版本<br><a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe" style="color:var(--gold-light);font-size:12px;">QQ9.9.26.44343</a><br>安装后改掉 updater.exe</p>
+      <h4>检查 QQ 版本</h4>
+      <p>点击 QQ 左下角菜单查看版本<br>9.920 ~ 9.926 已确认可用<br>太旧或太新需重装指定版本<br><a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe" style="color:var(--gold-light);font-size:12px;">下载 QQ9.9.26.44343</a></p>
     </div>
     <div class="step">
       <div class="step-num">2</div>
       <h4>下载宣发姬</h4>
-      <p>从 GitHub Releases<br>下载最新 exe 到任意目录</p>
+      <p>从国内 CDN<br>下载最新 exe 到任意目录</p>
     </div>
     <div class="step">
       <div class="step-num">3</div>
@@ -394,7 +412,7 @@
     </div>
     <div class="step">
       <div class="step-num">6</div>
-      <h4>勾选 → 发送</h4>
+      <h4>勾选 &#x2192; 发送</h4>
       <p>勾选目标群，编辑消息<br>点击发送即完成宣发</p>
     </div>
   </div>
@@ -404,17 +422,17 @@
   <h2 class="section-title">免费下载</h2>
   <p class="section-sub" style="margin-bottom:28px">单文件绿色版，解压即用</p>
   <div class="platform-badge">
-    <span>🪟</span> 目前仅支持 Windows
+    <span>&#x1FAA6;</span> 目前仅支持 Windows
   </div>
   <br>
-  <a href="https://github.com/Horikawa-Raiko/touhou-promoter/releases" class="btn btn-primary btn-lg">
-    <span class="icon">⬇</span> 下载最新版
+  <a href="https://s3.bitiful.net/raiko/download/%E4%B8%9C%E6%96%B9Project%E4%B8%80%E9%94%AE%E5%AE%A3%E5%8F%91%E5%A7%AC.exe" class="btn btn-primary btn-lg">
+    <span class="icon">&#x2B07;</span> 下载最新版
   </a>
-  <p class="version">v1.0 · ~35MB · 免安装</p>
+  <p class="version" id="app-version">加载中...</p>
   <p class="requirements">
     <strong>系统要求</strong><br>
-    Windows 10 / 11 64位 · 已安装 QQNT（Electron 版）<br>
-    首次启动需联网下载 NapCat（约 30MB）
+    Windows 10 / 11 64位 · 已安装指定版本 QQ（Electron 架构）<br>
+    首次启动需联网下载 NapCat（约 30MB，国内 CDN 高速下载）
   </p>
 </section>
 
@@ -424,21 +442,14 @@
   <div class="faq-list">
 
     <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> 启动报"未找到 QQNT"但我明明装了 QQ</div>
+      <div class="faq-q"><span class="q-mark">Q</span> 启动报"未找到 QQ"但我明明装了 QQ</div>
       <div class="faq-a">
-        <p>你装的可能是<b>旧版 Win32 QQ</b>，NapCat 只支持 <b>QQNT</b>（Electron 架构的新版 QQ）。</p>
-        <p>到 <a href="https://im.qq.com">im.qq.com</a> 下载"全新架构版"，安装后再试。</p>
-        <p>宣发姬会自动扫描 C/D/E 等所有盘符下的 QQNT 安装位置，无需手动指定路径。</p>
-      </div>
-    </div>
-
-    <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> QQ 版本太新或太旧，Worker 反复崩溃</div>
-      <div class="faq-a">
-        <p>QQNT 自动更新可能推出版本超出 NapCat 兼容范围。过旧的安装包同理。</p>
-        <p><b>统一解决方案：安装 NapCat 官方推荐版本</b></p>
+        <p>宣发姬需要 <b>Electron 架构的新版 QQ</b>，旧版 Win32 QQ 不支持。</p>
+        <p><b>下载前先自查：</b>打开 QQ，点击左下角菜单 &#x2192; 关于，查看版本号。目前已验证 <b>9.920 ~ 9.926</b> 均可正常使用。</p>
+        <p>如果版本太旧（9.9.20 以下）或太新（超出 NapCat 兼容范围），请统一安装推荐版本：</p>
         <p><a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe" style="color:var(--gold-light);font-weight:700;">QQ9.9.26.44343_x64.exe</a></p>
-        <p><b>安装后务必阻止 QQNT 自动更新：</b>到 QQNT 安装目录下，把 <code>updater.exe</code> 改名（如 <code>updater.exe.bak</code>），否则过两天又会被自动升级。</p>
+        <p><b>安装后建议关闭 QQ 自动更新：</b>打开 QQ 设置 &#x2192; 软件更新，取消勾选"有更新时自动安装"。这样就不会因为自动升级导致版本超出兼容范围。</p>
+        <p>宣发姬会自动扫描 C/D/E 等所有盘符下的 QQ 安装位置，无需手动指定路径。</p>
       </div>
     </div>
 
@@ -447,8 +458,9 @@
       <div class="faq-a">
         <p>NapCat 已启动并显示二维码，但宣发姬连不上它的 HTTP 服务（5700 端口）。</p>
         <p>最常见原因：</p>
-        <p>1. <b>Windows 防火墙弹窗</b> — 第一次运行时 Windows 会弹框问"是否允许访问网络"，如果点了取消或被挡在后面，后续请求全部超时。检查任务栏或 Alt+Tab 有没有隐藏的防火墙弹窗。</p>
-        <p>2. <b>QQ 进程残留</b> — 上次崩溃的 QQ 进程没杀干净，导致 NapCat 注入失败。打开任务管理器杀掉所有 QQ.exe 和 NapCatWinBootMain.exe 进程后重试。</p>
+        <p>1. <b>QQ 进程残留</b> — 上次崩溃的 QQ 进程没杀干净，导致 NapCat 注入失败。可以复制以下命令到 PowerShell 中运行：</p>
+        <p><code>taskkill /F /IM QQ.exe; taskkill /F /IM NapCatWinBootMain.exe</code></p>
+        <p>2. <b>Windows Defender 防火墙弹窗</b> — 第一次运行时 Windows 可能会弹框问"是否允许访问网络"。不过通常宣发姬和 QQ 同在本机回环通信，一般不触发防火墙。如果确实遇到弹窗，请点"允许"。</p>
       </div>
     </div>
 
@@ -463,14 +475,37 @@
     <div class="faq-item">
       <div class="faq-q"><span class="q-mark">Q</span> 旧版 QQ 改的文件夹名含"QQNT"但实际不是</div>
       <div class="faq-a">
-        <p>有人会把旧版 QQ 的文件夹改名来骗过检测。宣发姬会通过以下方式识别真正的 QQNT：</p>
+        <p>有人会把旧版 QQ 的文件夹改名来骗过检测。宣发姬会通过以下方式识别真正的 Electron 版 QQ：</p>
         <p>1. 路径是否包含 "QQNT" 字样</p>
         <p>2. 目录下是否有 <code>QQNT.dll</code>、<code>wrapper.node</code>、<code>misc.bin</code> 等标记文件</p>
-        <p>3. QQ.exe 的文件版本号 build ≥ 40000（QQNT 的特有范围，旧版 QQ 只有几百）</p>
-        <p>三条满足其一就算 QQNT，不必担心误判。</p>
+        <p>3. QQ.exe 的文件版本号 build &#x2265; 40000（Electron 版 QQ 的特有范围，旧版只有几百）</p>
+        <p>三条满足其一就算识别通过，不必担心误判。</p>
       </div>
     </div>
 
+    <div class="faq-item">
+      <div class="faq-q"><span class="q-mark">Q</span> 可以手动添加群聊吗？</div>
+      <div class="faq-a">
+        <p>可以！宣发姬支持<b>手动添加群聊</b>功能（菜单 &#x2192; 群列表 &#x2192; 添加群聊）。填写群号和分类信息后即可加入本地列表。</p>
+        <p>提交时选择<b>"添加到云端"</b>，你的群聊信息会提交给维护者审核，审核通过后所有宣发姬用户都能同步到。东方人多帮帮东方人，一起维护这份群列表 &#x1F338;</p>
+        <p><b>注意：</b>当前群列表数据来源于 THBWiki 自动爬取，分类体系并不完全匹配宣发姬的使用场景。后续会找时间彻底重新整理一版分类，敬请期待。</p>
+      </div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span class="q-mark">Q</span> 群列表会自动更新吗？</div>
+      <div class="faq-a">
+        <p>会的。宣发姬启动时会自动连接服务器，<b>增量同步</b>最新的群列表变更（类 Git 维护模式），只拉取有变化的部分，不重复下载完整 CSV。</p>
+        <p>同时软件本身也内置了<b>自动更新检查</b>，在帮助菜单中也可以手动"检查更新"。有新版本时会在启动时提示，一键下载升级。</p>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="disclaimer">
+    <strong>&#x26A0; 免责声明</strong><br>
+    本软件仅供东方同人创作者正常宣发使用。请勿用于对东方群进行骚扰、轰炸等恶意行为。<br>
+    用户的一切使用行为与开发者无关，由使用者自行承担相应责任。
   </div>
 </section>
 
@@ -480,8 +515,19 @@
     <a href="https://github.com/Horikawa-Raiko/touhou-promoter/issues">反馈问题</a>
     <a href="https://github.com/Horikawa-Raiko/touhou-promoter/releases">更新日志</a>
   </div>
-  <p>Made with ❤️ by 东方同人创作者 · 基于 <a href="https://github.com/NapNeko/NapCatQQ">NapCat</a> OneBot v11</p>
+  <p>Made with &#x2764;&#xFE0F; by 没灵感的鼓 &amp; 没人管的鼓 · 基于 <a href="https://github.com/NapNeko/NapCatQQ">NapCat</a> OneBot v11</p>
 </footer>
 
+<script>
+fetch('/version.json?' + Date.now(), {cache: 'no-store'})
+  .then(r => r.json())
+  .then(data => {
+    const v = data.app_version || '1.0';
+    document.getElementById('app-version').textContent = 'v' + v + ' · ~40MB · 免安装';
+  })
+  .catch(() => {
+    document.getElementById('app-version').textContent = 'v1.0 · ~40MB · 免安装';
+  });
+</script>
 </body>
 </html>

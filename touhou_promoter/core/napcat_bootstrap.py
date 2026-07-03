@@ -18,7 +18,7 @@ import requests
 from touhou_promoter.core.napcat_config import find_napcat_executable
 
 NAPCAT_RELEASE_API = "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
-NAPCAT_MIRROR_BASE = "http://152.136.232.146/napcat"  # 国内服务器镜像，优先使用
+NAPCAT_MIRROR_BASE = "https://s3.bitiful.net/raiko/napcat"  # 缤纷云CDN，国内高速下载
 GHPROXY_PREFIX = "https://ghproxy.com/"
 DEFAULT_NUM_WORKERS = 4
 
