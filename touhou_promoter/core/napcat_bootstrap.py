@@ -18,6 +18,7 @@ import requests
 from touhou_promoter.core.napcat_config import find_napcat_executable
 
 NAPCAT_RELEASE_API = "https://api.github.com/repos/NapNeko/NapCatQQ/releases/latest"
+NAPCAT_MIRROR_BASE = "http://152.136.232.146/napcat"  # 国内服务器镜像，优先使用
 GHPROXY_PREFIX = "https://ghproxy.com/"
 DEFAULT_NUM_WORKERS = 4
 
@@ -70,21 +71,25 @@ def _get_download_urls() -> list[tuple[str, str]]:
 
 
 def _fallback_urls() -> list[tuple[str, str]]:
-    """硬编码回退 URL（v4.18.6）"""
-    base = "https://github.com/NapNeko/NapCatQQ/releases/download/v4.18.6"
+    """硬编码回退 URL（v4.18.7）"""
+    base = "https://github.com/NapNeko/NapCatQQ/releases/download/v4.18.7"
     return [
         ("NapCat.Framework.zip", f"{base}/NapCat.Framework.zip"),
         ("NapCat.Shell.Windows.OneKey.zip", f"{base}/NapCat.Shell.Windows.OneKey.zip"),
     ]
 
 
-def download_with_progress(url: str, dest: str, progress_cb=None) -> bool:
-    """下载文件，可选进度回调 progress_cb(bytes_done, total_bytes)"""
-    for attempt in range(3):
-        download_url = url
-        # 第一次尝试直连，后续尝试走镜像
-        if attempt > 0:
-            download_url = GHPROXY_PREFIX + url
+def download_with_progress(url: str, dest: str, filename: str = "", progress_cb=None) -> bool:
+    """下载文件，可选进度回调 progress_cb(bytes_done, total_bytes)
+    优先从国内镜像服务器下载，失败后回退到 GitHub + ghproxy
+    """
+    urls_to_try = []
+    if filename and NAPCAT_MIRROR_BASE:
+        urls_to_try.append(f"{NAPCAT_MIRROR_BASE}/{filename}")
+    urls_to_try.append(url)  # GitHub 直连
+    urls_to_try.append(GHPROXY_PREFIX + url)  # ghproxy 镜像
+
+    for download_url in urls_to_try:
         try:
             resp = requests.get(download_url, stream=True, timeout=30)
             resp.raise_for_status()
@@ -98,8 +103,6 @@ def download_with_progress(url: str, dest: str, progress_cb=None) -> bool:
                         progress_cb(done, total)
             return True
         except Exception:
-            if attempt == 2:
-                return False
             continue
     return False
 
@@ -135,8 +138,8 @@ def install_napcat(target_dir: str, progress_cb=None, status_cb=None) -> bool:
             status_cb(f"正在下载 {filename} ...")
 
         dest = os.path.join(tmpdir, filename)
-        ok = download_with_progress(url, dest,
-            lambda done, total: progress_cb and progress_cb(filename, done, total))
+        ok = download_with_progress(url, dest, filename=filename,
+            progress_cb=lambda done, total: progress_cb and progress_cb(filename, done, total))
         if not ok:
             if status_cb:
                 status_cb(f"下载 {filename} 失败，请检查网络连接")
