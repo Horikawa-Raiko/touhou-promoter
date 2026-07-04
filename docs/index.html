@@ -5,388 +5,552 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>原初电台 — QQ群批量群发工具</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;600;700;900&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700;900&display=swap');
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --red: #C04040;
-    --red-light: #D46060;
-    --red-dark: #A03030;
+    --font-sans: 'Noto Sans SC', sans-serif;
+    --bg-deepest: #0a0a0a;
+    --bg-primary: #0d0d0d;
+    --bg-card: rgba(255,255,255,0.03);
+    --bg-card-hover: rgba(255,255,255,0.06);
+    --text-primary: #f5f5f5;
+    --text-secondary: #999;
+    --text-dim: #666;
+    --accent: #C04040;
+    --accent-glow: rgba(192,64,64,0.3);
     --gold: #D4A843;
-    --gold-light: #E8C56D;
-    --bg-deep: #1A1A2E;
-    --bg-card: #232344;
-    --bg-card-hover: #2A2A52;
-    --text: #E8E0D0;
-    --text-dim: #A09888;
-    --text-white: #FFF8F0;
+    --gold-dim: rgba(212,168,67,0.2);
+    --border: rgba(255,255,255,0.06);
+    --border-hover: rgba(255,255,255,0.12);
+    --radius-sm: 8px;
+    --radius: 12px;
+    --radius-full: 9999px;
+    --transition: 0.3s cubic-bezier(0.16,1,0.3,1);
+    --section-pad: clamp(4rem, 10vw, 8rem);
+    --content-w: min(90vw, 1040px);
   }
 
+  html { scroll-behavior: smooth; }
   body {
-    font-family: 'Noto Sans SC', sans-serif;
-    background: var(--bg-deep);
-    color: var(--text);
+    font-family: var(--font-sans);
+    background: var(--bg-deepest);
+    color: var(--text-primary);
     line-height: 1.7;
     overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
   }
 
-  /* Decorative background */
+  /* Atmospheric background glow */
   body::before {
     content: '';
-    position: fixed;
-    top: -50%; left: -50%;
-    width: 200%; height: 200%;
+    position: fixed; inset: 0;
     background:
-      radial-gradient(ellipse at 20% 20%, rgba(192,64,64,0.08) 0%, transparent 50%),
-      radial-gradient(ellipse at 80% 60%, rgba(212,168,67,0.06) 0%, transparent 50%),
-      radial-gradient(ellipse at 50% 80%, rgba(192,64,64,0.04) 0%, transparent 40%);
-    pointer-events: none;
+      radial-gradient(ellipse 80% 60% at 30% 10%, rgba(192,64,64,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 50% at 70% 80%, rgba(212,168,67,0.04) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 40% at 50% 50%, rgba(255,255,255,0.015) 0%, transparent 50%);
+    pointer-events: none; z-index: 0;
+  }
+
+  /* Mouse grid canvas */
+  #grid-canvas {
+    position: fixed; inset: 0;
     z-index: 0;
+    pointer-events: none;
   }
 
   .container {
-    max-width: 960px;
+    max-width: var(--content-w);
     margin: 0 auto;
     padding: 0 24px;
-    position: relative;
-    z-index: 1;
+    position: relative; z-index: 1;
   }
 
-  /* Header */
-  header {
-    text-align: center;
-    padding: 80px 0 60px;
+  /* ── Nav ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(10,10,10,0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
   }
-  header .badge {
-    display: inline-block;
-    background: rgba(212,168,67,0.15);
-    border: 1px solid rgba(212,168,67,0.3);
-    color: var(--gold-light);
-    padding: 4px 16px;
-    border-radius: 20px;
-    font-size: 13px;
-    font-weight: 600;
+  nav .nav-inner {
+    max-width: var(--content-w);
+    margin: 0 auto;
+    padding: 0 24px;
+    height: 56px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  nav .nav-logo {
+    font-size: 16px; font-weight: 700;
+    color: var(--text-primary);
+    text-decoration: none;
+    display: flex; align-items: center; gap: 8px;
+  }
+  nav .nav-logo .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+  nav .nav-cta {
+    padding: 8px 20px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--gold-dim);
+    color: var(--gold);
+    font-size: 13px; font-weight: 600;
+    text-decoration: none;
+    transition: all var(--transition);
+  }
+  nav .nav-cta:hover {
+    background: rgba(212,168,67,0.08);
+    border-color: var(--gold);
+  }
+
+  /* ── Hero ── */
+  .hero {
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    text-align: center;
+    padding: 120px 24px 80px;
+    position: relative;
+  }
+  .hero .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 14px;
+    border-radius: var(--radius-full);
+    border: 1px solid rgba(212,168,67,0.2);
+    font-size: 12px; font-weight: 600;
+    color: var(--gold);
     letter-spacing: 0.5px;
+    margin-bottom: 32px;
+  }
+  .hero .badge .live-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #4ade80;
+    box-shadow: 0 0 6px rgba(74,222,128,0.5);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .hero h1 {
+    font-size: clamp(2.5rem, 7vw, 5rem);
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: #fff;
     margin-bottom: 24px;
   }
-  .app-icon {
-    font-size: 72px;
-    margin-bottom: 16px;
-    display: block;
-    filter: drop-shadow(0 4px 24px rgba(192,64,64,0.4));
+  .hero h1 .accent {
+    background: linear-gradient(135deg, var(--gold) 0%, #e8c56d 50%, var(--gold) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
-  header h1 {
-    font-size: 48px;
-    font-weight: 900;
-    color: var(--text-white);
-    letter-spacing: 2px;
-    margin-bottom: 12px;
+  .hero .subtitle {
+    font-size: clamp(1rem, 2vw, 1.2rem);
+    color: var(--text-secondary);
+    max-width: 480px;
+    margin: 0 auto 40px;
+    line-height: 1.8;
   }
-  header h1 .accent { color: var(--gold); }
-  header .subtitle {
-    font-size: 18px;
-    color: var(--text-dim);
-    max-width: 520px;
-    margin: 0 auto 36px;
-  }
-
-  /* Buttons */
-  .btn-row { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .hero .btn-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
   .btn {
     display: inline-flex; align-items: center; gap: 8px;
-    padding: 14px 36px;
-    border-radius: 10px;
-    font-size: 16px;
-    font-weight: 700;
+    padding: 14px 32px;
+    border-radius: var(--radius-full);
+    font-size: 15px; font-weight: 600;
     font-family: inherit;
     text-decoration: none;
     cursor: pointer;
     border: none;
-    transition: transform 0.15s, box-shadow 0.15s;
+    transition: all var(--transition);
+    white-space: nowrap;
   }
-  .btn:hover { transform: translateY(-1px); }
   .btn-primary {
-    background: linear-gradient(135deg, var(--red), var(--red-dark));
-    color: #fff;
-    box-shadow: 0 4px 20px rgba(192,64,64,0.4);
+    background: #fff;
+    color: #0a0a0a;
   }
-  .btn-primary:hover { box-shadow: 0 6px 28px rgba(192,64,64,0.55); }
-  .btn-secondary {
+  .btn-primary:hover {
+    background: #e5e5e5;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+  }
+  .btn-outline {
     background: transparent;
-    color: var(--gold);
-    border: 1.5px solid rgba(212,168,67,0.3);
+    color: var(--text-primary);
+    border: 1px solid var(--border-hover);
   }
-  .btn-secondary:hover {
-    background: rgba(212,168,67,0.08);
-    border-color: rgba(212,168,67,0.5);
+  .btn-outline:hover {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.2);
   }
-  .btn-lg { padding: 18px 48px; font-size: 18px; border-radius: 12px; }
-  .btn .icon { font-size: 20px; }
 
-  /* Sections */
-  section { padding: 80px 0; }
+  /* ── Section headings ── */
+  section { padding: var(--section-pad) 0; }
+  .section-label {
+    display: block;
+    font-size: 12px; font-weight: 600;
+    color: var(--gold);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 16px;
+  }
   .section-title {
-    text-align: center;
-    font-size: 32px;
-    font-weight: 900;
-    color: var(--text-white);
+    font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: #fff;
     margin-bottom: 12px;
   }
   .section-sub {
-    text-align: center;
-    color: var(--text-dim);
-    margin-bottom: 48px;
+    color: var(--text-secondary);
     font-size: 15px;
+    margin-bottom: 56px;
+    line-height: 1.7;
   }
+  .section-header { text-align: center; }
 
-  /* Feature Cards */
+  /* ── Features ── */
   .features {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 24px;
+    gap: 1px;
+    background: var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
   }
   .feature-card {
     background: var(--bg-card);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 16px;
-    padding: 36px 28px;
-    text-align: center;
-    transition: transform 0.2s, border-color 0.2s;
+    padding: 40px 32px;
+    transition: background var(--transition);
+    position: relative;
   }
-  .feature-card:hover {
-    transform: translateY(-4px);
-    border-color: rgba(212,168,67,0.2);
-  }
-  .feature-card .icon {
-    font-size: 44px;
+  .feature-card:hover { background: var(--bg-card-hover); }
+  .feature-card .f-icon {
+    font-size: 28px;
     margin-bottom: 20px;
     display: block;
+    width: 48px; height: 48px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: var(--radius);
+    background: rgba(192,64,64,0.08);
+    border: 1px solid rgba(192,64,64,0.12);
   }
   .feature-card h3 {
-    font-size: 20px;
-    font-weight: 700;
-    color: var(--gold);
-    margin-bottom: 10px;
+    font-size: 17px; font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
   }
   .feature-card p {
-    color: var(--text-dim);
+    color: var(--text-secondary);
     font-size: 14px;
     line-height: 1.7;
   }
 
-  /* Steps */
+  /* ── Steps ── */
   .steps {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 24px;
+    gap: 1px;
+    background: var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
   }
   .step {
+    background: var(--bg-card);
+    padding: 32px 24px;
     text-align: center;
     position: relative;
+    transition: background var(--transition);
   }
+  .step:hover { background: var(--bg-card-hover); }
   .step-num {
-    width: 52px; height: 52px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, var(--red), var(--red-dark));
-    color: #fff;
-    font-size: 22px;
-    font-weight: 900;
+    width: 40px; height: 40px;
+    border-radius: var(--radius-full);
+    background: rgba(192,64,64,0.15);
+    border: 1px solid rgba(192,64,64,0.25);
+    color: var(--accent);
+    font-size: 16px; font-weight: 800;
     display: flex; align-items: center; justify-content: center;
-    margin: 0 auto 16px;
-    box-shadow: 0 4px 16px rgba(192,64,64,0.35);
+    margin: 0 auto 14px;
   }
   .step h4 {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--text-white);
+    font-size: 15px; font-weight: 700;
+    color: #fff;
     margin-bottom: 6px;
   }
   .step p {
-    font-size: 13px;
-    color: var(--text-dim);
+    font-size: 13px; color: var(--text-secondary);
+    line-height: 1.7;
   }
-  /* step connector */
-  .step::after {
-    content: '';
-    position: absolute;
-    top: 26px; left: calc(50% + 38px);
-    width: calc(100% - 76px);
-    height: 1px;
-    background: linear-gradient(90deg, rgba(212,168,67,0.3), transparent);
+  .step a { color: var(--gold); font-size: 12px; text-decoration: none; }
+  .step a:hover { text-decoration: underline; }
+  .steps-2 {
+    grid-template-columns: repeat(2, 1fr);
+    max-width: 520px; margin: 1px auto 0;
   }
-  .step:last-child::after { display: none; }
 
-  /* Download Section */
-  .download-section {
+  /* ── Download CTA ── */
+  .download-spot {
     text-align: center;
-    padding: 60px 0 40px;
+    padding: var(--section-pad) 0;
   }
-  .download-section .platform-badge {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 20px;
-    padding: 6px 18px;
+  .download-spot .pill-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 16px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--border-hover);
     font-size: 13px;
     color: var(--text-dim);
     margin-bottom: 24px;
   }
-  .download-section .version {
+  .download-spot .version-text {
     color: var(--text-dim);
     font-size: 13px;
-    margin-top: 12px;
+    margin-top: 16px;
   }
-  .requirements {
-    margin-top: 28px;
+  .download-spot .reqs {
+    margin-top: 24px;
     font-size: 13px;
     color: var(--text-dim);
     line-height: 1.8;
   }
-  .requirements strong { color: var(--text); }
+  .download-spot .reqs strong { color: var(--text-primary); }
 
-  /* Footer */
-  footer {
-    text-align: center;
-    padding: 48px 0;
-    border-top: 1px solid rgba(255,255,255,0.06);
-  }
-  footer p { color: var(--text-dim); font-size: 13px; }
-  footer a { color: var(--gold); text-decoration: none; }
-  footer a:hover { text-decoration: underline; }
-  footer .links { display: flex; gap: 24px; justify-content: center; margin-bottom: 12px; }
-
-  /* Dividers */
-  .divider {
-    text-align: center;
-    color: var(--gold);
-    font-size: 24px;
-    letter-spacing: 12px;
-    padding: 20px 0;
-    opacity: 0.5;
-  }
-
-  /* FAQ */
-  .faq-list { max-width: 760px; margin: 0 auto; }
-  .faq-item {
+  /* ── Community ── */
+  .community-slab {
+    display: flex; align-items: center; gap: 28px;
+    max-width: 480px; margin: 0 auto;
     background: var(--bg-card);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px;
-    margin-bottom: 12px;
-    overflow: hidden;
-    transition: border-color 0.2s;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
   }
-  .faq-item:hover { border-color: rgba(212,168,67,0.2); }
-  .faq-q {
-    padding: 18px 24px;
-    cursor: default;
-    font-weight: 700;
+  .community-slab img {
+    width: 120px; height: 120px;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+  }
+  .community-slab h4 {
+    font-size: 15px; font-weight: 700;
     color: var(--gold);
-    font-size: 15px;
-    display: flex; align-items: flex-start; gap: 10px;
+    margin-bottom: 6px;
   }
-  .faq-q .q-mark { flex-shrink: 0; font-size: 18px; }
-  .faq-a {
-    padding: 0 24px 20px 52px;
+  .community-slab .qq-num {
+    font-size: 26px; font-weight: 900;
+    color: #fff;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  .community-slab p {
     color: var(--text-dim);
-    font-size: 14px;
-    line-height: 1.8;
+    font-size: 13px;
+    line-height: 1.6;
   }
-  .faq-a code {
-    background: rgba(255,255,255,0.08);
+
+  /* ── FAQ ── */
+  .faq-list { max-width: 720px; margin: 0 auto; }
+  .faq-item {
+    border-bottom: 1px solid var(--border);
+  }
+  .faq-item:first-child { border-top: 1px solid var(--border); }
+  .faq-q {
+    padding: 20px 0;
+    cursor: pointer;
+    font-weight: 600;
+    color: #fff;
+    font-size: 15px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    user-select: none;
+    transition: color var(--transition);
+  }
+  .faq-q:hover { color: var(--gold); }
+  .faq-q::after {
+    content: '+';
+    font-size: 20px; font-weight: 300;
+    color: var(--text-dim);
+    transition: transform var(--transition);
+    flex-shrink: 0;
+  }
+  .faq-item.open .faq-q::after {
+    transform: rotate(45deg);
+  }
+  .faq-q .q-mark {
+    color: var(--gold);
+    font-weight: 800;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .faq-a {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease, padding 0.4s ease;
+  }
+  .faq-item.open .faq-a {
+    max-height: 2000px;
+    padding-bottom: 24px;
+  }
+  .faq-a-inner {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.9;
+    padding-left: 24px;
+  }
+  .faq-a-inner p { margin-bottom: 8px; }
+  .faq-a-inner p:last-child { margin-bottom: 0; }
+  .faq-a-inner code {
+    background: rgba(255,255,255,0.06);
     padding: 2px 8px;
     border-radius: 4px;
     font-size: 13px;
     word-break: break-all;
+    color: var(--text-primary);
   }
-  .faq-a a { color: var(--gold-light); }
+  .faq-a-inner a { color: var(--gold); }
+  .faq-a-inner b { color: var(--text-primary); }
 
-  /* Disclaimer */
+  /* ── Disclaimer ── */
   .disclaimer {
-    margin-top: 32px;
+    max-width: 720px;
+    margin: 40px auto 24px;
     padding: 16px 20px;
-    background: rgba(192,64,64,0.08);
-    border: 1px solid rgba(192,64,64,0.2);
-    border-radius: 10px;
+    background: rgba(192,64,64,0.05);
+    border: 1px solid rgba(192,64,64,0.12);
+    border-radius: var(--radius-sm);
     font-size: 13px;
     color: var(--text-dim);
     line-height: 1.8;
     text-align: center;
   }
 
-  /* Responsive */
+  /* ── Footer ── */
+  footer {
+    text-align: center;
+    padding: 48px 0;
+    border-top: 1px solid var(--border);
+  }
+  footer p { color: var(--text-dim); font-size: 13px; }
+  footer a { color: var(--gold); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  footer .links { display: flex; gap: 24px; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
+
+  /* ── Scroll reveal ── */
+  .reveal {
+    opacity: 0;
+    transform: translateY(32px);
+    transition: opacity 0.8s cubic-bezier(0.16,1,0.3,1), transform 0.8s cubic-bezier(0.16,1,0.3,1);
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* ── Responsive ── */
   @media (max-width: 768px) {
-    header { padding: 48px 0 36px; }
-    header h1 { font-size: 32px; }
     .features { grid-template-columns: 1fr; }
     .steps { grid-template-columns: 1fr 1fr; }
-    .step::after { display: none; }
-    section { padding: 48px 0; }
-    .btn-lg { padding: 14px 32px; font-size: 16px; }
+    .steps-2 { grid-template-columns: 1fr 1fr; max-width: none; }
+    .community-slab { flex-direction: column; text-align: center; }
+    .hero h1 { font-size: clamp(2rem, 10vw, 3rem); }
+    .feature-card { padding: 28px 24px; }
   }
   @media (max-width: 480px) {
     .steps { grid-template-columns: 1fr; }
+    .steps-2 { grid-template-columns: 1fr; }
     .btn-row { flex-direction: column; align-items: center; }
+    .hero { padding: 100px 16px 60px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity: 1; transform: none; transition: none; }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 </style>
 </head>
 <body>
 
-<header class="container">
-  <span class="app-icon">&#x26E9;&#xFE0F;</span>
-  <span class="badge">Touhou Project</span>
-  <h1>原初<span class="accent">电台</span></h1>
-  <p class="subtitle">
-    为东方同人创作者打造的 QQ 群批量群发工具<br>
-    扫码即用，一键触达 1800+ 东方群
-  </p>
-  <div class="btn-row">
-    <a href="https://s3.bitiful.net/raiko/download/%E5%8E%9F%E5%88%9D%E7%94%B5%E5%8F%B0.exe" class="btn btn-primary btn-lg">
-      <span class="icon">&#x2B07;</span> 下载 Windows 版
-    </a>
-    <a href="https://github.com/Horikawa-Raiko/touhou-promoter" class="btn btn-secondary">
-      <span class="icon">&#x2302;</span> GitHub
-    </a>
+<canvas id="grid-canvas"></canvas>
+
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="nav-logo"><span class="dot"></span>原初电台</a>
+    <a href="#download" class="nav-cta">免费下载</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="container">
+    <div class="badge"><span class="live-dot"></span>Touhou Project</div>
+    <h1>原初<span class="accent">电台</span></h1>
+    <p class="subtitle">
+      为东方同人创作者打造的 QQ 群批量群发工具<br>扫码即用，一键触达 1800+ 东方群
+    </p>
+    <div class="btn-row">
+      <a href="https://s3.bitiful.net/raiko/download/%E5%8E%9F%E5%88%9D%E7%94%B5%E5%8F%B0.exe" class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        下载 Windows 版
+      </a>
+      <a href="https://github.com/Horikawa-Raiko/touhou-promoter" class="btn btn-outline">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
   </div>
 </header>
 
-<div class="divider container">&#x25C6; &#x25C6; &#x25C6;</div>
-
 <section id="features" class="container">
-  <h2 class="section-title">核心功能</h2>
-  <p class="section-sub">专为东方宣发场景设计，简化一切复杂操作</p>
-  <div class="features">
+  <div class="section-header reveal">
+    <span class="section-label">Features</span>
+    <h2 class="section-title">核心功能</h2>
+    <p class="section-sub">专为东方宣发场景设计，简化一切复杂操作</p>
+  </div>
+  <div class="features reveal">
     <div class="feature-card">
-      <span class="icon">&#x1F4F1;</span>
+      <span class="f-icon">&#x1F4F1;</span>
       <h3>扫码即用</h3>
       <p>扫一扫登录 QQ Bot，全程无需输入密码。支持多账号缓存，再次启动秒登。</p>
     </div>
     <div class="feature-card">
-      <span class="icon">&#x26A1;</span>
+      <span class="f-icon">&#x26A1;</span>
       <h3>批量群发</h3>
       <p>内置 1800+ 东方群，按分类筛选目标群。智能限速防风控，支持断点续传和秒级撤回。</p>
     </div>
     <div class="feature-card">
-      <span class="icon">&#x1F442;</span>
+      <span class="f-icon">&#x1F442;</span>
       <h3>智能监听</h3>
       <p>群发后自动监听 @Bot 消息和关键词回复，QQ 气泡风格面板，一键快速回复咨询。</p>
     </div>
     <div class="feature-card">
-      <span class="icon">&#x1F504;</span>
+      <span class="f-icon">&#x1F504;</span>
       <h3>持续更新</h3>
       <p>群列表类 Git 维护，启动自动增量同步最新数据。软件内置自动更新，有新版本一键下载升级。</p>
     </div>
   </div>
 </section>
 
-<section id="howto" class="container">
-  <h2 class="section-title">安装步骤</h2>
-  <p class="section-sub">从零开始，五分钟完成配置</p>
-  <div class="steps">
+<section id="howto" class="container" style="padding-top:calc(var(--section-pad) * 1.15);">
+  <div class="section-header reveal">
+    <span class="section-label">Quick Start</span>
+    <h2 class="section-title">安装步骤</h2>
+    <p class="section-sub">从零开始，五分钟完成配置</p>
+  </div>
+  <div class="steps reveal">
     <div class="step">
       <div class="step-num">1</div>
       <h4>检查 QQ 版本</h4>
-      <p>点击 QQ 左下角菜单查看版本<br>9.920 ~ 9.926 已确认可用<br>太旧或太新需重装指定版本<br><a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe" style="color:var(--gold-light);font-size:12px;">下载 QQ9.9.26.44343</a></p>
+      <p>QQ 左下角菜单查看版本<br>9.920 ~ 9.926 已确认可用<br>太旧或太新需重装指定版本<br><a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe">下载 QQ9.9.26.44343</a></p>
     </div>
     <div class="step">
       <div class="step-num">2</div>
@@ -404,7 +568,7 @@
       <p>手机 QQ 扫码确认<br>Bot 账号自动上线</p>
     </div>
   </div>
-  <div class="steps" style="margin-top:24px; grid-template-columns: repeat(2, 1fr); max-width:480px; margin-left:auto; margin-right:auto;">
+  <div class="steps steps-2 reveal" style="margin-top:1px;">
     <div class="step">
       <div class="step-num">5</div>
       <h4>加载群列表</h4>
@@ -418,92 +582,167 @@
   </div>
 </section>
 
-<section class="download-section container">
-  <h2 class="section-title">免费下载</h2>
-  <p class="section-sub" style="margin-bottom:28px">单文件绿色版，解压即用</p>
-  <div class="platform-badge">
-    <span>&#x1FAA6;</span> 目前仅支持 Windows
+<section id="download" class="download-spot container">
+  <div class="section-header reveal">
+    <span class="section-label">Download</span>
+    <h2 class="section-title">免费下载</h2>
+    <p class="section-sub" style="margin-bottom:28px">单文件绿色版，下载即用</p>
   </div>
-  <br>
-  <a href="https://s3.bitiful.net/raiko/download/%E5%8E%9F%E5%88%9D%E7%94%B5%E5%8F%B0.exe" class="btn btn-primary btn-lg">
-    <span class="icon">&#x2B07;</span> 下载最新版
-  </a>
-  <p class="version" id="app-version">加载中...</p>
-  <p class="requirements">
-    <strong>系统要求</strong><br>
-    Windows 10 / 11 64位 · 已安装指定版本 QQ（Electron 架构）<br>
-    首次启动需联网下载 NapCat（约 30MB，国内 CDN 高速下载）
-  </p>
+  <div class="reveal">
+    <div class="pill-row">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      目前仅支持 Windows
+    </div>
+    <br>
+    <a href="https://s3.bitiful.net/raiko/download/%E5%8E%9F%E5%88%9D%E7%94%B5%E5%8F%B0.exe" class="btn btn-primary" style="padding:18px 40px;font-size:17px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      下载最新版
+    </a>
+    <p class="version-text" id="app-version">加载中...</p>
+    <p class="reqs">
+      <strong>系统要求</strong><br>
+      Windows 10 / 11 64位 · 已安装指定版本 QQ（Electron 架构）<br>
+      首次启动需联网下载 NapCat（约 30MB）
+    </p>
+  </div>
 </section>
 
+<div class="container reveal" style="margin-top:16px;margin-bottom:48px;">
+  <div class="community-slab">
+    <img src="二维码.png" alt="交流群二维码">
+    <div>
+      <h4>原初电台 · 交流群</h4>
+      <div class="qq-num">1050774708</div>
+      <p>问题反馈 · 功能建议 · 群列表维护<br>欢迎加入一起聊天</p>
+    </div>
+  </div>
+</div>
+
 <section id="faq" class="container">
-  <h2 class="section-title">常见问题</h2>
-  <p class="section-sub">安装和使用中可能遇到的坑</p>
-  <div class="faq-list">
+  <div class="section-header reveal">
+    <span class="section-label">FAQ</span>
+    <h2 class="section-title">常见问题</h2>
+    <p class="section-sub">安装和使用中可能遇到的坑（请务必看完）</p>
+  </div>
+  <div class="faq-list reveal">
 
     <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> 启动报"未找到 QQ"但我明明装了 QQ</div>
-      <div class="faq-a">
-        <p>原初电台需要 <b>Electron 架构的新版 QQ</b>，旧版 Win32 QQ 不支持。</p>
-        <p><b>下载前先自查：</b>打开 QQ，点击左下角菜单 &#x2192; 关于，查看版本号。目前已验证 <b>9.920 ~ 9.926</b> 均可正常使用。</p>
-        <p>如果版本太旧（9.9.20 以下）或太新（超出 NapCat 兼容范围），请统一安装推荐版本：</p>
-        <p><a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe" style="color:var(--gold-light);font-weight:700;">QQ9.9.26.44343_x64.exe</a></p>
-        <p><b>安装后建议关闭 QQ 自动更新：</b>打开 QQ 设置 &#x2192; 软件更新，取消勾选"有更新时自动安装"。这样就不会因为自动升级导致版本超出兼容范围。</p>
-        <p>原初电台会自动扫描 C/D/E 等所有盘符下的 QQ 安装位置，无需手动指定路径。</p>
-      </div>
+      <div class="faq-q"><span><span class="q-mark">Q</span> 这个软件适合我吗？</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p>本软件主要面向以下用户：</p>
+        <p>1. <b>需要在特定区域宣发的创作者/社团</b> — 比如你想把高校例会信息精准推送到本地的东方群。</p>
+        <p>2. <b>需要频繁进行群发消息的搬运工</b> — 软件可以批量勾选群组，提高转发效率。</p>
+        <p>3. <b>自己加了大量东方群且有宣发需求的用户</b> — 软件内置 1800+ 群列表只是全集，加的群越多，宣发覆盖面越广。</p>
+        <p>如果您不属于以上用户，但仍想为建设便捷的宣发软件尽自己的一份力量，同样欢迎试用软件或进群讨论！</p>
+      </div></div>
     </div>
 
     <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> 扫码登录正常但提示"等待超时"</div>
-      <div class="faq-a">
-        <p>NapCat 已启动并显示二维码，但原初电台连不上它的 HTTP 服务（5700 端口）。</p>
+      <div class="faq-q"><span><span class="q-mark">Q</span> 这个软件安全吗？会偷看我的聊天记录吗？</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p><b>绝对不会。</b>原初电台不会、也无法读取你的任何聊天记录。</p>
+        <p>软件获取的数据范围<b>仅限于</b>：</p>
+        <p>1. <b>QQ 登录凭证</b> — 完全由 NapCat 框架处理，扫码/快登均由 QQ 官方通道完成。原初电台<b>不接触</b>你的 QQ 密码，也不保存你的登录票据到任何云端。</p>
+        <p>2. <b>你加入的群列表</b> — 仅在加载群列表时调用 QQ API 获取"你加入了哪些群"（群号 + 群名），用于和内置 CSV 做交集匹配，确定哪些群可以发送。</p>
+        <p>3. <b>你提交的群信息</b> — 仅在你主动使用"添加到云端"功能时，才会把你填写的群号、群名等字段提交到服务器审核。</p>
+        <p><b>明确声明：</b>本软件<b>不读取、不截获、不上传、不存储</b>任何群聊消息、私聊消息、好友列表、聊天图片/文件。软件在群发后会监听 @Bot 消息和关键词回复，但<b>仅用于在软件界面上显示回复提醒</b>，不会把这些消息内容发到任何服务器。</p>
+        <p>所有云端同步操作均通过 HTTPS 加密传输，服务器仅存储群列表变更记录，不记录任何用户个人信息。</p>
+      </div></div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span><span class="q-mark">Q</span> 启动报"未找到 QQ"但我明明装了 QQ</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p>原初电台基于 NapCat 框架开发，该框架需要 <b>Electron 架构的新版 QQ</b>，旧版 Win32 QQ 不支持。</p>
+        <p><b>下载前先自查：</b>打开 QQ，点击左下角菜单 &#x2192; 关于，查看版本号。目前已验证 <b>9.920 ~ 9.926</b> 均可正常使用。</p>
+        <p>如果版本太旧（9.9.20 以下）或太新（超出 NapCat 兼容范围），请统一安装推荐版本：</p>
+        <p><a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe">QQ9.9.26.44343_x64.exe</a></p>
+        <p><b>安装后建议关闭 QQ 自动更新：</b>打开 QQ 设置 &#x2192; 软件更新，取消勾选"有更新时自动安装"。这样就不会因为自动升级导致版本超出兼容范围。</p>
+        <p>软件会自动扫描 C/D/E 等所有盘符下的 QQ 安装位置，无需手动指定路径。</p>
+      </div></div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span><span class="q-mark">Q</span> 扫码登录正常但提示"等待超时"</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p>NapCat 已启动并显示二维码，但软件连不上它的 HTTP 服务（5700 端口）。</p>
         <p>最常见原因：</p>
         <p>1. <b>QQ 进程残留</b> — 上次崩溃的 QQ 进程没杀干净，导致 NapCat 注入失败。可以复制以下命令到 PowerShell 中运行：</p>
         <p><code>taskkill /F /IM QQ.exe; taskkill /F /IM NapCatWinBootMain.exe</code></p>
-        <p>2. <b>Windows Defender 防火墙弹窗</b> — 第一次运行时 Windows 可能会弹框问"是否允许访问网络"。不过通常原初电台和 QQ 同在本机回环通信，一般不触发防火墙。如果确实遇到弹窗，请点"允许"。</p>
-      </div>
+        <p>或打开任务管理器手动结束QQ和NapCat进程。</p>
+        <p>2. <b>Windows Defender 防火墙弹窗</b> — 第一次运行时 Windows 可能会弹框问"是否允许访问网络"。不过通常软件和 QQ 同在本机回环通信，一般不触发防火墙。如果确实遇到弹窗，请点"允许"。</p>
+      </div></div>
     </div>
 
     <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> 快速登录点完没有反应</div>
-      <div class="faq-a">
+      <div class="faq-q"><span><span class="q-mark">Q</span> 为什么启动软件后我的 QQ 自动退出了？</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p>这是正常的！NapCat 需要<b>接管</b>你的 QQ 进程来实现 Bot 功能。启动时会先关闭你当前的 QQ，然后以注入模式重新拉起。</p>
+        <p>这意味着启动软件期间你<b>不能同时使用这个 QQ 号</b>。关闭软件后即可重新正常登录 QQ。</p>
+      </div></div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span><span class="q-mark">Q</span> 快速登录点完没有反应！</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
         <p>快速登录需要之前成功登录过一次，并且 QQ 服务器端保留了会话。如果换过设备、QQ 密码、或服务器端清除了会话，快登会失败。</p>
         <p>此时 NapCat 会自动降级到二维码扫码模式，重新扫码登录一次即可恢复快登缓存。</p>
-      </div>
+      </div></div>
     </div>
 
     <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> 旧版 QQ 改的文件夹名含"QQNT"但实际不是</div>
-      <div class="faq-a">
-        <p>有人会把旧版 QQ 的文件夹改名来骗过检测。原初电台会通过以下方式识别真正的 Electron 版 QQ：</p>
+      <div class="faq-q"><span><span class="q-mark">Q</span> 我移动过QQ的文件夹，软件识别得到吗？</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p>有人会把 QQ 所在的文件夹改名、移动位置使得常规检测失效。本软件会通过以下方式识别真正的 Electron 版 QQ：</p>
         <p>1. 路径是否包含 "QQNT" 字样</p>
         <p>2. 目录下是否有 <code>QQNT.dll</code>、<code>wrapper.node</code>、<code>misc.bin</code> 等标记文件</p>
         <p>3. QQ.exe 的文件版本号 build &#x2265; 40000（Electron 版 QQ 的特有范围，旧版只有几百）</p>
         <p>三条满足其一就算识别通过，不必担心误判。</p>
-      </div>
+        <p>若您有以上操作行为且软件未能正确识别，建议卸载 QQ 并重新安装到规范路径。</p>
+      </div></div>
     </div>
 
     <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> 可以手动添加群聊吗？</div>
-      <div class="faq-a">
-        <p>可以！原初电台支持<b>手动添加群聊</b>功能（菜单 &#x2192; 群列表 &#x2192; 添加群聊）。填写群号和分类信息后即可加入本地列表。</p>
-        <p>提交时选择<b>"添加到云端"</b>，你的群聊信息会提交给维护者审核，审核通过后所有原初电台用户都能同步到。东方人多帮帮东方人，一起维护这份群列表 &#x1F338;</p>
-        <p><b>注意：</b>当前群列表数据来源于 THBWiki 自动爬取，分类体系并不完全匹配原初电台的使用场景。后续会找时间彻底重新整理一版分类，敬请期待。</p>
-      </div>
+      <div class="faq-q"><span><span class="q-mark">Q</span> 为什么页面上说 1800+ 群，我的群列表里只有几十个？</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p>群列表里显示的是两个来源的<b>交集</b>：</p>
+        <p>1. <b>内置 CSV</b> — 从 THBWiki 爬取的约 1800 个东方群</p>
+        <p>2. <b>你 Bot 账号实际加入的群</b> — 载入群列表时会调用 QQ API 获取你加入的群</p>
+        <p>显然软件做不到向你不在的群里发送消息！如果你看到只有几十个，说明当前你加入的记录在 THBWiki 中的东方群只有几十个，试试加入更多的东方群来提升宣发范围，或等待后续的共享账号更新！</p>
+      </div></div>
     </div>
 
     <div class="faq-item">
-      <div class="faq-q"><span class="q-mark">Q</span> 群列表会自动更新吗？</div>
-      <div class="faq-a">
-        <p>会的。原初电台启动时会自动连接服务器，<b>增量同步</b>最新的群列表变更（类 Git 维护模式），只拉取有变化的部分，不重复下载完整 CSV。</p>
+      <div class="faq-q"><span><span class="q-mark">Q</span> 可以手动添加群聊吗？</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p>可以！本软件支持<b>手动添加群聊</b>功能（菜单 &#x2192; 群列表 &#x2192; 添加群聊）。填写群号和分类信息后即可加入本地列表。</p>
+        <p>提交时选择<b>"添加到云端"</b>，你的群聊信息会提交给维护者审核，审核通过后所有本软件的用户都能同步到。东方人帮帮东方人，一起维护这份群列表 &#x1F338;</p>
+        <p><b>注意：</b>当前群列表数据来源于 THBWiki 自动爬取，分类体系并不完全匹配本软件的使用场景。后续有时间将彻底重新整理一版分类，敬请期待。</p>
+      </div></div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span><span class="q-mark">Q</span> 群列表会自动更新吗？</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p>会的。本软件启动时会自动连接服务器，<b>增量同步</b>最新的群列表变更，只拉取有变化的部分，不重复下载完整 CSV。</p>
         <p>同时软件本身也内置了<b>自动更新检查</b>，在帮助菜单中也可以手动"检查更新"。有新版本时会在启动时提示，一键下载升级。</p>
-      </div>
+      </div></div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span><span class="q-mark">Q</span> 后续主要更新方向是什么？</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p>后续主要计划：</p>
+        <p>1. <b>重新设计群分类体系</b> — 当前分类来源于 THBWiki 爬取，并不完全匹配宣发场景。之后会找时间彻底重制一版，让分类更直观实用</p>
+        <p>2. <b>共享 Bot 账号</b> — 计划准备一个加满东方群的公共 QQ 号，作为"中心向宣发姬"。用户可以通过软件直接使用这个号来触达尽可能多的群，无需自己逐个加群</p>
+        <p>有其他想法欢迎加交流群反馈！</p>
+      </div></div>
     </div>
 
   </div>
 
-  <div class="disclaimer">
-    <strong>&#x26A0; 免责声明</strong><br>
+  <div class="disclaimer reveal">
+    <strong style="font-size:15px;">&#x26A0; 免责声明</strong><br>
     本软件仅供东方同人创作者正常宣发使用。请勿用于对东方群进行骚扰、轰炸等恶意行为。<br>
     用户的一切使用行为与开发者无关，由使用者自行承担相应责任。
   </div>
@@ -519,15 +758,107 @@
 </footer>
 
 <script>
+// Grid canvas — subtle mouse-reactive dot grid
+(function() {
+  const canvas = document.getElementById('grid-canvas');
+  const ctx = canvas.getContext('2d');
+  const SPACING = 40;      // dot grid spacing
+  const RADIUS = 2;        // dot glow radius around mouse
+  const FALLBACK = 0.12;   // opacity when far from mouse
+  let mouseX = -1000, mouseY = -1000;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  window.addEventListener('mousemove', function(e) {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const cols = Math.ceil(canvas.width / SPACING);
+    const rows = Math.ceil(canvas.height / SPACING);
+
+    for (let r = 0; r <= rows; r++) {
+      for (let c = 0; c <= cols; c++) {
+        const x = c * SPACING;
+        const y = r * SPACING;
+        const dist = Math.hypot(x - mouseX, y - mouseY);
+        // Glow radius: ~100px around mouse, falloff is inverse square
+        const glowFactor = 1 - Math.min(1, dist / 120);
+        const alpha = FALLBACK + glowFactor * 0.25;
+        const size = 0.6 + glowFactor * 1.2;
+
+        ctx.fillStyle = 'rgba(255,255,255,' + alpha.toFixed(3) + ')';
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Extra ring at closest proximity
+        if (glowFactor > 0.7) {
+          const ringAlpha = (glowFactor - 0.7) * 0.3;
+          ctx.strokeStyle = 'rgba(212,168,67,' + ringAlpha.toFixed(3) + ')';
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.arc(x, y, size + 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+// Version fetch
 fetch('/version.json?' + Date.now(), {cache: 'no-store'})
   .then(r => r.json())
   .then(data => {
-    const v = data.app_version || '1.0';
-    document.getElementById('app-version').textContent = 'v' + v + ' · ~40MB · 免安装';
+    document.getElementById('app-version').textContent = 'v' + (data.app_version || '1.0') + ' · ~40MB · 免安装';
   })
   .catch(() => {
     document.getElementById('app-version').textContent = 'v1.0 · ~40MB · 免安装';
   });
+
+// FAQ accordion
+document.querySelectorAll('.faq-q').forEach(q => {
+  q.addEventListener('click', () => {
+    const item = q.parentElement;
+    const wasOpen = item.classList.contains('open');
+    // close all
+    document.querySelectorAll('.faq-item.open').forEach(i => i.classList.remove('open'));
+    // toggle clicked
+    if (!wasOpen) item.classList.add('open');
+  });
+});
+
+// Scroll reveal
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Smooth scroll for anchor links
+document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+  anchor.addEventListener('click', function(e) {
+    const target = document.querySelector(this.getAttribute('href'));
+    if (target) {
+      e.preventDefault();
+      target.scrollIntoView({ behavior: 'smooth' });
+    }
+  });
+});
 </script>
 </body>
 </html>
