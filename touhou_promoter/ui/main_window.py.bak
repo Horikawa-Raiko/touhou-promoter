@@ -1,23 +1,18 @@
 """主窗口 — QSplitter左右布局，集成登录/群列表/消息编辑/发送控制/日志"""
-import hashlib
 import os
 import platform
-import shutil
 import subprocess
-import sys
 from datetime import datetime
-
-import requests
 
 from PyQt6.QtWidgets import (
     QMainWindow, QSplitter, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QTreeWidget, QTreeWidgetItem, QTextEdit, QPushButton,
     QProgressBar, QPlainTextEdit, QStatusBar, QMessageBox, QGroupBox,
     QFileDialog, QScrollArea, QLineEdit, QMenu, QApplication, QDialog, QFrame,
-    QHeaderView, QProgressDialog,
+    QHeaderView,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QPixmap, QIcon
+from PyQt6.QtGui import QPixmap
 
 from touhou_promoter.state.app_state import AppState
 from touhou_promoter.state.config_manager import ConfigManager
@@ -30,9 +25,6 @@ from touhou_promoter.ui.workers import SendWorker, RecallWorker
 from touhou_promoter.ui.settings_dialog import SettingsDialog
 from touhou_promoter.core.post_send_listener import PostSendListener
 from touhou_promoter.ui.listener_panel import ListenerPanel
-from touhou_promoter.core.update_checker import UpdateChecker, DEFAULT_SERVER
-from touhou_promoter.ui.add_group_dialog import AddGroupDialog
-from touhou_promoter.version import APP_VERSION
 
 
 class NapCatSetupWorker(QThread):
@@ -145,179 +137,120 @@ class GetLoginWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    """原初电台 主窗口"""
+    """东方Project一键宣发姬 主窗口"""
 
     # ── 明亮主题 ──────────────────────────────────────────────────
-    # ── 博丽神社巫女 亮色主题（和纸风）──────────────────────────────
     _THEME_LIGHT = """
     /* === 全局 === */
     QMainWindow {
-        background: #e8ddd5;
-        background-image: url({{asanoha_light}});
-    }
-    QWidget#main_central {
-        background: transparent;
-    }
-    QSplitter, QSplitter::handle {
-        background: transparent;
+        background: #ffffff;
     }
     QWidget {
-        background-color: #f5efe8;
-        color: #2a1810;
+        background: #ffffff;
+        color: #24292f;
         font-family: "Microsoft YaHei UI", "Segoe UI", "PingFang SC", sans-serif;
         font-size: 13px;
     }
 
     /* === 分组框 === */
     QGroupBox {
-        background-color: #ffffff;
-        background-image: url({{asanoha_light}});
-        border: 1px solid #d4c8b8;
-        border-radius: 8px;
-        margin-top: 16px;
-        padding: 18px 12px 12px 12px;
+        background: #f6f8fa;
+        border: 1px solid #d0d7de;
+        border-radius: 10px;
+        margin-top: 14px;
+        padding: 20px 14px 14px 14px;
         font-weight: bold;
         font-size: 13px;
-        color: #8a7020;
     }
     QGroupBox::title {
         subcontrol-origin: margin;
-        left: 14px;
-        padding: 0 8px;
-        color: #8a7020;
-        background: #ffffff;
-        border-radius: 3px;
-    }
-
-    /* === 消息编辑区补充样式 === */
-    QLabel#me_char_count {
-        font-size: 10px;
-        color: #7a6a5a;
-        background: transparent;
-        padding: 0;
-    }
-
-    /* === 输入框 === */
-    QLineEdit {
-        border: 1px solid #d4c8b8;
-        border-radius: 6px;
-        padding: 4px 8px;
-        background: #ffffff;
-        color: #2a1810;
-        font-size: 13px;
-    }
-    QLineEdit:focus {
-        border-color: #c04040;
+        left: 16px;
+        padding: 0 10px;
+        color: #24292f;
+        background: #f6f8fa;
+        border-radius: 4px;
     }
 
     /* === 按钮 — 通用 === */
     QPushButton {
-        border: 1px solid #d4c8b8;
-        border-radius: 5px;
-        padding: 6px 14px;
-        background: #ffffff;
-        color: #6a5040;
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        padding: 7px 14px;
+        background: #f6f8fa;
+        color: #24292f;
         font-size: 12px;
-        min-height: 22px;
+        min-height: 20px;
     }
     QPushButton:hover {
-        background: #faf7f3;
-        border-color: #c04040;
-        color: #2a1810;
+        background: #eaeef2;
+        border-color: #afb8c1;
     }
     QPushButton:pressed {
-        background: #f0ebe4;
-        border-color: #d04040;
-        color: #2a1810;
+        background: #d0d7de;
+        border-color: #8c959f;
     }
     QPushButton:disabled {
-        color: #9a8070;
-        background: #f5efe8;
-        border-color: #d4c8b8;
+        color: #8c959f;
+        background: #f6f8fa;
+        border-color: #d0d7de;
     }
 
-    /* === 主操作按钮 — 博丽红 === */
-    QPushButton#loginBtn {
+    /* === 主操作按钮 — 绿色启动 === */
+    QPushButton#loginBtn, QPushButton#sendBtn {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #d42020, stop:1 #b01010);
-        border: 1px solid #b01010;
-        border-radius: 5px;
-        color: #f0e8e0;
+            stop:0 #2ea043, stop:1 #238636);
+        border-color: #238636;
+        color: #fff;
         font-weight: bold;
-        font-size: 12px;
-        padding: 6px 14px;
-        min-height: 22px;
     }
-    QPushButton#loginBtn:hover {
+    QPushButton#loginBtn:hover, QPushButton#sendBtn:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #e83838, stop:1 #d42020);
-        border-color: #d42020;
+            stop:0 #3fb950, stop:1 #2ea043);
     }
-    QPushButton#sendBtn {
-        border: 1px solid #d42020;
-        border-radius: 5px;
-        padding: 6px 14px;
-        background: #d42020;
-        color: #f0e8e0;
-        font-weight: bold;
-        font-size: 12px;
-        min-height: 22px;
-    }
-    QPushButton#sendBtn:hover {
-        background: #e83838;
-        border-color: #e83838;
-    }
-    /* === 登录按钮 — 快登模式（金色） === */
+    /* === 登录按钮 — 快速登录模式（蓝色） === */
     QPushButton#loginBtn[mode="quick"] {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #b09030, stop:1 #8a7020);
-        border-color: #8a7020;
-        color: #ffffff;
+            stop:0 #1a73e8, stop:1 #1557b0);
+        border-color: #1557b0;
+        color: #fff;
         font-weight: bold;
     }
     QPushButton#loginBtn[mode="quick"]:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #c9a040, stop:1 #b09030);
+            stop:0 #4a90d9, stop:1 #1a73e8);
     }
 
-    /* === 退出按钮 === */
+    /* === 退出按钮 — 红色 === */
     QPushButton#logoutBtn {
-        background: #ffffff;
-        border: 1px solid #c03030;
-        border-radius: 6px;
-        color: #c03030;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #e63946, stop:1 #c1121f);
+        border-color: #c1121f;
+        color: #fff;
         font-weight: bold;
-        font-size: 12px;
-        padding: 6px 14px;
     }
     QPushButton#logoutBtn:hover {
-        background: #f4e0e0;
-        border-color: #e04040;
-        color: #e04040;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #f25c67, stop:1 #e63946);
     }
 
-    /* === 撤回按钮 === */
+    /* === 危险按钮 === */
     QPushButton#recallBtn {
-        background: #ffffff;
-        border: 1px solid #8a7020;
-        border-radius: 5px;
-        color: #8a7020;
-        font-size: 12px;
-        padding: 6px 14px;
+        background: #f6f8fa;
+        border-color: #e63946;
+        color: #e63946;
     }
     QPushButton#recallBtn:hover {
-        background: #f4ecd0;
-        border-color: #b09030;
-        color: #b09030;
+        background: #ffeef0;
+        border-color: #c1121f;
     }
 
     /* === 快捷登录按钮 === */
     QPushButton[cssClass="quickLogin"] {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #ffffff, stop:1 #faf7f3);
-        border: 1px solid #d04040;
+            stop:0 #e3ecff, stop:1 #d0dcff);
+        border: 1px solid #5b7fc0;
         border-radius: 8px;
-        color: #8a7020;
+        color: #2d4a7a;
         font-weight: bold;
         font-size: 13px;
         text-align: left;
@@ -325,142 +258,114 @@ class MainWindow(QMainWindow):
     }
     QPushButton[cssClass="quickLogin"]:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #fff5f5, stop:1 #ffffff);
-        border-color: #e62020;
-        color: #b09030;
+            stop:0 #d0dcff, stop:1 #b8c8f0);
+        border-color: #3b5998;
     }
 
     /* === 输入框 === */
     QTextEdit, QPlainTextEdit {
-        border: 1px solid #d4c8b8;
+        border: 1px solid #d0d7de;
         border-radius: 6px;
         background: #ffffff;
-        color: #2a1810;
-        padding: 8px;
-        font-size: 13px;
-        selection-background: #f0d0d0;
-        selection-color: #2a1810;
+        color: #24292f;
+        padding: 10px;
+        selection-background: #b6d4fe;
     }
     QTextEdit:focus, QPlainTextEdit:focus {
-        border-color: #c04040;
+        border-color: #0969da;
     }
 
     /* === 树形控件 === */
     QTreeWidget {
-        border: 1px solid #d4c8b8;
+        border: 1px solid #d0d7de;
         border-radius: 6px;
         background: #ffffff;
-        alternate-background-color: #f0ebe4;
+        alternate-background-color: #f6f8fa;
         outline: none;
         padding: 4px;
-        color: #2a1810;
-        font-size: 12px;
     }
     QTreeWidget::item {
         padding: 3px 6px;
         border-radius: 3px;
     }
     QTreeWidget::item:selected {
-        background: #f0d0d0;
-        color: #2a1810;
+        background: #0969da;
+        color: #fff;
     }
     QTreeWidget::item:hover:!selected {
-        background: #faf7f3;
-    }
-    QTreeWidget::item:focus {
-        outline: none;
-    }
-    QTreeWidget::indicator {
-        width: 15px;
-        height: 15px;
-    }
-    QTreeWidget::indicator:unchecked {
-        border: 2px solid #d4c8b8;
-        border-radius: 3px;
-        background: transparent;
-    }
-    QTreeWidget::indicator:checked {
-        border: none;
-        border-radius: 3px;
-        background: #d42020;
-    }
-    QTreeWidget::indicator:indeterminate {
-        border: none;
-        border-radius: 3px;
-        background: #f0c8c8;
+        background: #eaeef2;
     }
     QHeaderView::section {
-        background: #ffffff;
+        background: #f6f8fa;
         border: none;
-        border-bottom: 2px solid #d4c8b8;
+        border-bottom: 1px solid #d0d7de;
         padding: 6px 10px;
         font-weight: bold;
-        color: #8a7020;
+        color: #656d76;
         font-size: 11px;
+        text-transform: uppercase;
     }
 
     /* === 进度条 === */
     QProgressBar {
-        border: 1px solid #d4c8b8;
+        border: none;
         border-radius: 4px;
-        background: #f0ebe4;
-        height: 8px;
+        background: #eaeef2;
+        height: 6px;
         text-align: center;
         font-size: 10px;
-        color: #6a5040;
+        color: #656d76;
     }
     QProgressBar::chunk {
         background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-            stop:0 #d42020, stop:0.5 #c04040, stop:1 #8a2020);
-        border-radius: 3px;
+            stop:0 #e63946, stop:1 #f0883e);
+        border-radius: 4px;
     }
 
     /* === 分割条 === */
     QSplitter::handle {
-        background: #d4c8b8;
+        background: #d0d7de;
         width: 2px;
     }
 
     /* === 状态栏 === */
     QStatusBar {
-        background: #ffffff;
-        border-top: 1px solid #d4c8b8;
-        color: #6a5040;
+        background: #f6f8fa;
+        border-top: 1px solid #d0d7de;
+        color: #656d76;
         padding: 2px 8px;
-        font-size: 11px;
+        font-size: 12px;
     }
 
     /* === 滚动条 === */
     QScrollBar:vertical {
-        background: #e8ddd5;
-        width: 9px;
+        background: transparent;
+        width: 8px;
         margin: 2px;
     }
     QScrollBar::handle:vertical {
-        background: #c8b8a8;
+        background: #c0c8d0;
         border-radius: 4px;
         min-height: 30px;
-        margin: 2px;
     }
     QScrollBar::handle:vertical:hover {
-        background: #a89888;
+        background: #8c959f;
     }
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
         height: 0;
     }
     QScrollBar:horizontal {
-        background: #e8ddd5;
-        height: 9px;
+        background: transparent;
+        height: 8px;
         margin: 2px;
     }
     QScrollBar::handle:horizontal {
-        background: #c8b8a8;
+        background: #c0c8d0;
         border-radius: 4px;
         min-width: 30px;
-        margin: 2px;
     }
     QScrollBar::handle:horizontal:hover {
-        background: #a89888;
+        background: #8c959f;
     }
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
         width: 0;
@@ -469,230 +374,171 @@ class MainWindow(QMainWindow):
     /* === 标签 === */
     QLabel {
         background: transparent;
-        color: #6a5040;
+        color: #656d76;
         border: none;
     }
 
     /* === 菜单栏 === */
     QMenuBar {
-        background: #ffffff;
-        border-bottom: 1px solid #d4c8b8;
+        background: #f6f8fa;
+        border-bottom: 1px solid #d0d7de;
         padding: 2px;
-        color: #6a5040;
-        font-size: 12px;
+        color: #24292f;
     }
     QMenuBar::item {
         padding: 4px 12px;
         border-radius: 4px;
     }
     QMenuBar::item:selected {
-        background: #f0ebe4;
-        color: #8a7020;
+        background: #eaeef2;
     }
     QMenu {
         background: #ffffff;
-        border: 1px solid #d4c8b8;
+        border: 1px solid #d0d7de;
         border-radius: 6px;
         padding: 4px;
     }
     QMenu::item {
         padding: 6px 28px 6px 16px;
         border-radius: 4px;
-        color: #2a1810;
     }
     QMenu::item:selected {
-        background: #f0d0d0;
+        background: #0969da;
+        color: #ffffff;
     }
     QMenu::separator {
         height: 1px;
-        background: #d4c8b8;
+        background: #d0d7de;
         margin: 4px 8px;
     }
 
     /* === 提示框 === */
     QToolTip {
         background: #ffffff;
-        border: 1px solid #d4c8b8;
+        border: 1px solid #d0d7de;
         border-radius: 4px;
         padding: 4px 8px;
-        color: #2a1810;
-        font-size: 11px;
+        color: #24292f;
     }
     """.strip()
-    # ── 博丽神社巫女 深色主题 ──────────────────────────────────────
     _THEME = """
     /* === 全局 === */
     QMainWindow {
-        background: #120808;
-        background-image: url({{asanoha_dark}});
-    }
-    QWidget#main_central {
-        background: transparent;
-    }
-    QSplitter, QSplitter::handle {
-        background: transparent;
+        background: #0d1117;
     }
     QWidget {
-        background-color: #1a0e0c;
-        color: #f0e8e0;
+        background: #0d1117;
+        color: #c9d1d9;
         font-family: "Microsoft YaHei UI", "Segoe UI", "PingFang SC", sans-serif;
         font-size: 13px;
     }
 
-    /* === 分组框 === */
+    /* === 分组框 — 玻璃卡片风格 === */
     QGroupBox {
-        background-color: #241614;
-        background-image: url({{asanoha_dark}});
-        border: 1px solid #4a3030;
-        border-radius: 8px;
-        margin-top: 16px;
-        padding: 18px 12px 12px 12px;
+        background: #161b22;
+        border: 1px solid #21262d;
+        border-radius: 10px;
+        margin-top: 14px;
+        padding: 20px 14px 14px 14px;
         font-weight: bold;
         font-size: 13px;
-        color: #c9a040;
     }
     QGroupBox::title {
         subcontrol-origin: margin;
-        left: 14px;
-        padding: 0 8px;
-        color: #c9a040;
-        background: #241614;
-        border-radius: 3px;
-    }
-
-    /* === 消息编辑区补充样式 === */
-    QLabel#me_char_count {
-        font-size: 10px;
-        color: #7a6a5a;
-        background: transparent;
-        padding: 0;
-    }
-
-    /* === 输入框 === */
-    QLineEdit {
-        border: 1px solid #4a3030;
-        border-radius: 6px;
-        padding: 4px 8px;
-        background: #1a0e0c;
-        color: #f0e8e0;
-        font-size: 13px;
-    }
-    QLineEdit:focus {
-        border-color: #c04040;
+        left: 16px;
+        padding: 0 10px;
+        color: #e6edf3;
+        background: #161b22;
+        border-radius: 4px;
     }
 
     /* === 按钮 — 通用 === */
     QPushButton {
-        border: 1px solid #4a3030;
-        border-radius: 5px;
-        padding: 6px 14px;
-        background: #241614;
-        color: #b8a898;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 7px 14px;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #21262d, stop:1 #1a1e25);
+        color: #c9d1d9;
         font-size: 12px;
-        min-height: 22px;
+        min-height: 20px;
     }
     QPushButton:hover {
-        background: #2d1c1a;
-        border-color: #8b4040;
-        color: #f0e8e0;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #30363d, stop:1 #252a33);
+        border-color: #8b949e;
     }
     QPushButton:pressed {
-        background: #1a0e0c;
-        border-color: #c04040;
-        color: #f0e8e0;
+        background: #0d1117;
+        border-color: #6e7681;
     }
     QPushButton:disabled {
-        color: #7a6a5a;
-        background: #1a1010;
-        border-color: #302020;
+        color: #484f58;
+        background: #161b22;
+        border-color: #21262d;
     }
 
-    /* === 主操作按钮 — 博丽红 === */
-    QPushButton#loginBtn {
+    /* === 主操作按钮 — 绿色启动 === */
+    QPushButton#loginBtn, QPushButton#sendBtn {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #e62020, stop:1 #c01010);
-        border: 1px solid #c01010;
-        border-radius: 5px;
-        color: #f0e8e0;
+            stop:0 #2ea043, stop:1 #238636);
+        border-color: #3fb950;
+        color: #fff;
         font-weight: bold;
-        font-size: 12px;
-        padding: 6px 14px;
-        min-height: 22px;
     }
-    QPushButton#loginBtn:hover {
+    QPushButton#loginBtn:hover, QPushButton#sendBtn:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #ff3838, stop:1 #e62020);
-        border-color: #e62020;
+            stop:0 #3fb950, stop:1 #2ea043);
     }
-    QPushButton#loginBtn:pressed {
-        background: #b01010;
-        border-color: #8b1a1a;
+    QPushButton#loginBtn:pressed, QPushButton#sendBtn:pressed {
+        background: #238636;
     }
-    QPushButton#sendBtn {
-        border: 1px solid #e62020;
-        border-radius: 5px;
-        padding: 6px 14px;
-        background: #e62020;
-        color: #f0e8e0;
-        font-weight: bold;
-        font-size: 12px;
-        min-height: 22px;
-    }
-    QPushButton#sendBtn:hover {
-        background: #ff3838;
-        border-color: #ff3838;
-    }
-    /* === 登录按钮 — 快登模式（金色） === */
+    /* === 登录按钮 — 快速登录模式（蓝色） === */
     QPushButton#loginBtn[mode="quick"] {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #c9a040, stop:1 #9a7020);
-        border-color: #9a7020;
-        color: #1a0e0c;
+            stop:0 #1a73e8, stop:1 #1557b0);
+        border-color: #4a90d9;
+        color: #fff;
         font-weight: bold;
     }
     QPushButton#loginBtn[mode="quick"]:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #e0c060, stop:1 #c9a040);
+            stop:0 #4a90d9, stop:1 #1a73e8);
     }
 
-    /* === 退出按钮 — 暖红描边 === */
+    /* === 退出按钮 — 红色 === */
     QPushButton#logoutBtn {
-        background: #241614;
-        border: 1px solid #d04040;
-        border-radius: 6px;
-        color: #d04040;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #da3633, stop:1 #b62324);
+        border-color: #f85149;
+        color: #fff;
         font-weight: bold;
-        font-size: 12px;
-        padding: 6px 14px;
     }
     QPushButton#logoutBtn:hover {
-        background: #2d1c1a;
-        border-color: #ff6060;
-        color: #ff6060;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #f85149, stop:1 #da3633);
     }
 
-    /* === 撤回按钮 — 金棕描边 === */
+    /* === 危险按钮 — 撤回 === */
     QPushButton#recallBtn {
-        background: #241614;
-        border: 1px solid #8a7020;
-        border-radius: 5px;
-        color: #c9a040;
-        font-size: 12px;
-        padding: 6px 14px;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #21262d, stop:1 #1a1e25);
+        border-color: #f85149;
+        color: #f85149;
     }
     QPushButton#recallBtn:hover {
-        background: #2d1c1a;
-        border-color: #c9a040;
-        color: #e0c060;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+            stop:0 #3d1f1f, stop:1 #2d1515);
+        border-color: #ff7b72;
     }
 
     /* === 快捷登录按钮 === */
     QPushButton[cssClass="quickLogin"] {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #2d1c1a, stop:1 #241614);
-        border: 1px solid #8b4040;
+            stop:0 #1c2541, stop:1 #16213e);
+        border: 1px solid #3b5998;
         border-radius: 8px;
-        color: #c9a040;
+        color: #a8c0f0;
         font-weight: bold;
         font-size: 13px;
         text-align: left;
@@ -700,142 +546,115 @@ class MainWindow(QMainWindow):
     }
     QPushButton[cssClass="quickLogin"]:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-            stop:0 #3d2c2a, stop:1 #2d1c1a);
-        border-color: #c04040;
-        color: #e0c060;
+            stop:0 #2a3d6e, stop:1 #1c2e54);
+        border-color: #5b7fc0;
+        color: #c8d8ff;
     }
 
     /* === 输入框 === */
     QTextEdit, QPlainTextEdit {
-        border: 1px solid #4a3030;
+        border: 1px solid #21262d;
         border-radius: 6px;
-        background: #1a0e0c;
-        color: #f0e8e0;
-        padding: 8px;
-        font-size: 13px;
-        selection-background: #3a1018;
-        selection-color: #f0e8e0;
+        background: #0d1117;
+        color: #c9d1d9;
+        padding: 10px;
+        selection-background: #264f78;
     }
     QTextEdit:focus, QPlainTextEdit:focus {
-        border-color: #c04040;
+        border-color: #58a6ff;
     }
 
     /* === 树形控件 === */
     QTreeWidget {
-        border: 1px solid #4a3030;
+        border: 1px solid #21262d;
         border-radius: 6px;
-        background: #1a0e0c;
-        alternate-background-color: #201210;
+        background: #0d1117;
+        alternate-background-color: #161b22;
         outline: none;
         padding: 4px;
-        color: #f0e8e0;
-        font-size: 12px;
     }
     QTreeWidget::item {
         padding: 3px 6px;
         border-radius: 3px;
     }
     QTreeWidget::item:selected {
-        background: #3a1018;
-        color: #f0e8e0;
+        background: #1f6feb;
+        color: #fff;
     }
     QTreeWidget::item:hover:!selected {
-        background: #2d1c1a;
-    }
-    QTreeWidget::item:focus {
-        outline: none;
-    }
-    QTreeWidget::indicator {
-        width: 15px;
-        height: 15px;
-    }
-    QTreeWidget::indicator:unchecked {
-        border: 2px solid #4a3030;
-        border-radius: 3px;
-        background: transparent;
-    }
-    QTreeWidget::indicator:checked {
-        border: none;
-        border-radius: 3px;
-        background: #e62020;
-    }
-    QTreeWidget::indicator:indeterminate {
-        border: none;
-        border-radius: 3px;
-        background: #8b1a1a;
+        background: #1a2535;
     }
     QHeaderView::section {
-        background: #241614;
+        background: #161b22;
         border: none;
-        border-bottom: 2px solid #4a3030;
+        border-bottom: 1px solid #21262d;
         padding: 6px 10px;
         font-weight: bold;
-        color: #c9a040;
+        color: #8b949e;
         font-size: 11px;
+        text-transform: uppercase;
     }
 
     /* === 进度条 === */
     QProgressBar {
-        border: 1px solid #4a3030;
+        border: none;
         border-radius: 4px;
-        background: #1a0e0c;
-        height: 8px;
+        background: #21262d;
+        height: 6px;
         text-align: center;
         font-size: 10px;
-        color: #b8a898;
+        color: #8b949e;
     }
     QProgressBar::chunk {
         background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-            stop:0 #e62020, stop:0.5 #c04040, stop:1 #8b1a1a);
-        border-radius: 3px;
+            stop:0 #da3633, stop:1 #f0883e);
+        border-radius: 4px;
     }
 
     /* === 分割条 === */
     QSplitter::handle {
-        background: #4a3030;
+        background: #21262d;
         width: 2px;
     }
 
     /* === 状态栏 === */
     QStatusBar {
-        background: #241614;
-        border-top: 1px solid #4a3030;
-        color: #b8a898;
+        background: #161b22;
+        border-top: 1px solid #21262d;
+        color: #8b949e;
         padding: 2px 8px;
-        font-size: 11px;
+        font-size: 12px;
     }
 
     /* === 滚动条 === */
     QScrollBar:vertical {
-        background: #1a1010;
-        width: 9px;
+        background: transparent;
+        width: 8px;
         margin: 2px;
     }
     QScrollBar::handle:vertical {
-        background: #4a3030;
+        background: #30363d;
         border-radius: 4px;
         min-height: 30px;
-        margin: 2px;
     }
     QScrollBar::handle:vertical:hover {
-        background: #6a4040;
+        background: #484f58;
     }
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
         height: 0;
     }
     QScrollBar:horizontal {
-        background: #1a1010;
-        height: 9px;
+        background: transparent;
+        height: 8px;
         margin: 2px;
     }
     QScrollBar::handle:horizontal {
-        background: #4a3030;
+        background: #30363d;
         border-radius: 4px;
         min-width: 30px;
-        margin: 2px;
     }
     QScrollBar::handle:horizontal:hover {
-        background: #6a4040;
+        background: #484f58;
     }
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
         width: 0;
@@ -844,54 +663,50 @@ class MainWindow(QMainWindow):
     /* === 标签 === */
     QLabel {
         background: transparent;
-        color: #b8a898;
+        color: #8b949e;
         border: none;
     }
 
     /* === 菜单栏 === */
     QMenuBar {
-        background: #1a0e0c;
-        border-bottom: 1px solid #4a3030;
+        background: #161b22;
+        border-bottom: 1px solid #21262d;
         padding: 2px;
-        color: #b8a898;
-        font-size: 12px;
+        color: #c9d1d9;
     }
     QMenuBar::item {
         padding: 4px 12px;
         border-radius: 4px;
     }
     QMenuBar::item:selected {
-        background: #2d1c1a;
-        color: #c9a040;
+        background: #21262d;
     }
     QMenu {
-        background: #241614;
-        border: 1px solid #4a3030;
+        background: #161b22;
+        border: 1px solid #30363d;
         border-radius: 6px;
         padding: 4px;
     }
     QMenu::item {
         padding: 6px 28px 6px 16px;
         border-radius: 4px;
-        color: #f0e8e0;
     }
     QMenu::item:selected {
-        background: #3a1018;
+        background: #1f6feb;
     }
     QMenu::separator {
         height: 1px;
-        background: #4a3030;
+        background: #21262d;
         margin: 4px 8px;
     }
 
     /* === 提示框 === */
     QToolTip {
-        background: #2d1c1a;
-        border: 1px solid #8b4040;
+        background: #21262d;
+        border: 1px solid #30363d;
         border-radius: 4px;
         padding: 4px 8px;
-        color: #f0e8e0;
-        font-size: 11px;
+        color: #e6edf3;
     }
     """.strip()
 
@@ -921,17 +736,13 @@ class MainWindow(QMainWindow):
         self._external_poll_timer: QTimer | None = None
         self._quick_login_accounts: list = []     # 缓存的快登账号
         self._quick_login_attempting = False    # 是否正在尝试快速登录
-        self._pending_update: dict | None = None  # 待处理的app更新信息
         self._quick_login_mode = False          # 当前启动是否为快登模式（区分扫码/快登的QQ窗口提示）
 
         self._log_entries: list[tuple[str, str, str]] = []  # [(msg, level, timestamp), ...]
 
-        self.setWindowTitle("原初电台")
-        icon_path = self._resolve_asset("app_icon.png")
-        if os.path.isfile(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        self.setWindowTitle("东方Project一键宣发姬")
         self.resize(1080, 800)
-        self.setStyleSheet(self._resolve_theme(self._THEME if self._dark_mode else self._THEME_LIGHT))
+        self.setStyleSheet(self._THEME if self._dark_mode else self._THEME_LIGHT)
 
         self._build_menu()
         self._build_ui()
@@ -939,19 +750,13 @@ class MainWindow(QMainWindow):
         self._connect_state_signals()
         self._connect_ui_signals()
 
-        self._append_log("[系统] 原初电台 已就绪")
+        self._append_log("[系统] 东方Project一键宣发姬 已就绪")
         if self._onebot_mode == "external":
             self._append_log(f"[系统] 外部OneBot模式，目标: {self._onebot_url}")
             QTimer.singleShot(500, self._start_external_poll)
 
-        # 自动加载上次打开的CSV；首次使用则用内置默认CSV
+        # 自动加载上次打开的CSV
         csv_path = self._config_mgr.config.csv_path
-        if not csv_path or not os.path.isfile(csv_path):
-            bundled = self._resolve_asset("东方QQ群列表.csv")
-            if os.path.isfile(bundled):
-                csv_path = bundled
-                self._config_mgr.config.csv_path = bundled
-                self._config_mgr.save()
         if csv_path and os.path.isfile(csv_path):
             try:
                 from touhou_promoter.core.csv_loader import load_groups
@@ -961,12 +766,6 @@ class MainWindow(QMainWindow):
                 self._append_log(f"[CSV] 自动加载: {len(records)} 条记录, {len(self._csv_groups)} 个唯一群号")
             except Exception as e:
                 self._append_log(f"[CSV] 自动加载失败: {e}")
-
-        # 确保 updater.exe 存在
-        self._ensure_updater()
-
-        # 后台检查更新
-        self._check_updates()
 
         # 旧配置迁移：有 last_self_id 但 cached_accounts 为空 → 自动填充
         cached = self._config_mgr.config.cached_accounts
@@ -1015,18 +814,16 @@ class MainWindow(QMainWindow):
 
         file_menu = mb.addMenu("文件(&F)")
         file_menu.addAction("加载CSV...", self._on_load_csv)
-        file_menu.addAction("添加群聊(&A)...", self._on_add_group)
         file_menu.addAction("退出(&Q)", self.close)
 
         settings_menu = mb.addMenu("设置(&S)")
         settings_menu.addAction("NapCat路径...", self._on_napcat_path)
         settings_menu.addAction("发送参数...", self._on_send_params)
         settings_menu.addSeparator()
-        theme_label = "切换亮色主题" if self._dark_mode else "切换深色主题"
+        theme_label = "☀ 切换亮色主题" if self._dark_mode else "🌙 切换深色主题"
         self._theme_action = settings_menu.addAction(theme_label, self._on_toggle_theme)
 
         help_menu = mb.addMenu("帮助(&H)")
-        help_menu.addAction("检查更新(&U)...", self._on_check_app_update)
         help_menu.addAction("关于...", self._on_about)
 
     # ================================================================
@@ -1034,7 +831,6 @@ class MainWindow(QMainWindow):
     # ================================================================
     def _build_ui(self):
         central = QWidget()
-        central.setObjectName("main_central")
         self.setCentralWidget(central)
 
         splitter = QSplitter(Qt.Orientation.Horizontal, central)
@@ -1058,13 +854,13 @@ class MainWindow(QMainWindow):
         else:
             self.qr_label.setText("请点击下方按钮\n启动NapCat并登录")
         self.qr_label.setStyleSheet(
-            "border: 2px dashed #6a4040; border-radius: 10px;"
-            "font-size: 14px; color: #7a6a5a; background: transparent;"
+            "border: 2px dashed #8c959f; border-radius: 12px;"
+            "font-size: 14px; background: transparent;"
         )
 
         self.login_status_label = QLabel("状态: 未登录")
         self.login_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.login_status_label.setStyleSheet("font-size: 11px; color: #7a6a5a; background: transparent;")
+        self.login_status_label.setStyleSheet("font-size: 12px; background: transparent;")
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
@@ -1086,7 +882,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(login_group)
 
         # -- 群列表区 --
-        group_group = QGroupBox("群列表")
+        group_group = QGroupBox("📋 群列表")
         group_layout = QVBoxLayout(group_group)
         group_layout.setSpacing(6)
 
@@ -1114,7 +910,7 @@ class MainWindow(QMainWindow):
         self.group_tree.setAlternatingRowColors(True)
         self.group_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.group_selection_label = QLabel("已选: 0 / 0 群（登录后可刷新交集）")
-        self.group_selection_label.setStyleSheet("font-size: 11px; color: #7a6a5a; background: transparent;")
+        self.group_selection_label.setStyleSheet("font-size: 12px; background: transparent;")
         group_layout.addLayout(toolbar)
         group_layout.addWidget(self.group_tree)
         group_layout.addWidget(self.group_selection_label)
@@ -1123,21 +919,30 @@ class MainWindow(QMainWindow):
         splitter.addWidget(left)
 
         # === 中间：消息编辑器（独立一栏，纵向排版，手机QQ风格）===
-        msg_editor = QGroupBox("消息编辑")
-        msg_editor.setObjectName("me_group")
+        msg_editor = QWidget()
+        msg_editor.setObjectName("msgEditor")
         me_layout = QVBoxLayout(msg_editor)
-        me_layout.setContentsMargins(10, 20, 10, 10)
-        me_layout.setSpacing(6)
+        me_layout.setContentsMargins(4, 4, 4, 4)
+        me_layout.setSpacing(4)
 
-        # 字数计数（紧凑放在标题下方）
+        # 标题栏
+        me_header = QHBoxLayout()
+        me_title = QLabel("消息编辑")
+        me_title.setStyleSheet("font-weight: bold; font-size: 12px; background: transparent;")
+        me_header.addWidget(me_title)
+        me_header.addStretch()
         self.char_count_label = QLabel("字数: 0")
-        self.char_count_label.setObjectName("me_char_count")
-        me_layout.addWidget(self.char_count_label)
+        self.char_count_label.setStyleSheet("font-size: 11px; background: transparent;")
+        me_header.addWidget(self.char_count_label)
+        me_layout.addLayout(me_header)
 
         # 富文本消息编辑区（文本+图片混排，所见即所得）
         self.message_edit = QTextEdit()
         self.message_edit.setAcceptRichText(True)
         self.message_edit.setPlaceholderText("在此输入消息...\n拖拽图片到编辑区即可插入")
+        self.message_edit.setStyleSheet(
+            "QTextEdit { padding: 8px; font-size: 13px; }"
+        )
         self.message_edit.textChanged.connect(self._on_message_changed)
         # 拖拽图片支持
         self.message_edit.setAcceptDrops(True)
@@ -1176,9 +981,9 @@ class MainWindow(QMainWindow):
         )
         self.interval_label = QLabel(short_info)
         self.interval_label.setToolTip(full_info)
-        self.interval_label.setStyleSheet("font-size: 10px; color: #7a6a5a; background: transparent;")
+        self.interval_label.setStyleSheet("font-size: 10px; color: #8b949e; background: transparent;")
         self.target_label = QLabel("目标群: 0")
-        self.target_label.setStyleSheet("font-weight: bold; font-size: 11px; color: #c9a040; background: transparent;")
+        self.target_label.setStyleSheet("font-weight: bold; font-size: 11px; color: #e6edf3; background: transparent;")
         ol = QHBoxLayout(self._editor_overlay)
         ol.setContentsMargins(8, 2, 8, 3)
         ol.setSpacing(10)
@@ -1292,7 +1097,7 @@ class MainWindow(QMainWindow):
             )
             self.qr_label.setPixmap(scaled)
             self.qr_label.setStyleSheet(
-                "background: #fff; border: 2px solid #c9a040; border-radius: 10px;"
+                "background: #fff; border: 2px solid #3fb950; border-radius: 12px;"
             )
             self.login_status_label.setText("状态: 请用手机QQ扫描上方二维码")
             self._append_log("[登录] QR码已显示，请扫码")
@@ -1342,7 +1147,6 @@ class MainWindow(QMainWindow):
         clean = re.sub(r"\x1b\[[0-9;]*m", "", line)
         if not clean.strip():
             return
-
         for pattern in self._NAPCAT_LOG_SUPPRESS:
             if re.search(pattern, clean, re.IGNORECASE):
                 return
@@ -1357,32 +1161,32 @@ class MainWindow(QMainWindow):
             if self._quick_login_mode:
                 self.qr_label.setText("快速登录中\n无需扫码")
                 self.qr_label.setStyleSheet(
-                    "border: 2px solid #c9a040; border-radius: 10px;"
-                    "font-size: 16px; font-weight: bold; color: #c9a040; background: transparent;"
+                    "border: 2px solid #3fb950; border-radius: 12px;"
+                    "font-size: 16px; font-weight: bold; background: transparent;"
                 )
             else:
                 self.qr_label.setText("请在弹出的\nQQ窗口中\n扫码登录")
                 self.qr_label.setStyleSheet(
-                    "border: 2px solid #c9a040; border-radius: 10px;"
-                    "font-size: 16px; font-weight: bold; color: #f0e8e0; background: transparent;"
+                    "border: 2px solid #3fb950; border-radius: 12px;"
+                    "font-size: 16px; font-weight: bold; background: transparent;"
                 )
         elif "OneBot 已就绪" in status:
-            self.qr_label.setText("OneBot\n已就绪")
+            self.qr_label.setText("✅ OneBot\n已就绪")
             self.qr_label.setStyleSheet(
-                "border: 2px solid #5a9a5a; border-radius: 10px;"
-                "font-size: 18px; font-weight: bold; color: #5a9a5a; background: transparent;"
+                "border: 2px solid #3fb950; border-radius: 12px;"
+                "font-size: 18px; font-weight: bold; background: transparent;"
             )
         elif "正在启动" in status:
             self.qr_label.setText("正在启动\nNapCat...")
             self.qr_label.setStyleSheet(
-                "border: 2px solid #c09040; border-radius: 10px;"
-                "font-size: 14px; color: #c09040; background: transparent;"
+                "border: 2px solid #d2991d; border-radius: 12px;"
+                "font-size: 14px; background: transparent;"
             )
         elif "已退出" in status:
             self.qr_label.setText("NapCat\n已退出")
             self.qr_label.setStyleSheet(
-                "border: 2px dashed #6a4040; border-radius: 10px;"
-                "font-size: 14px; color: #7a6a5a; background: transparent;"
+                "border: 2px dashed #8c959f; border-radius: 12px;"
+                "font-size: 14px; background: transparent;"
             )
             if not self._napcat or not self._napcat.is_running():
                 self._set_login_btn_mode("scan")
@@ -1416,7 +1220,6 @@ class MainWindow(QMainWindow):
         """登录状态变化"""
         if online:
             self._quick_login_mode = False
-            self._quick_login_attempting = False
             self.login_status_label.setText("状态: 在线")
             self.status_online.setText("在线")
             self.status_qq.setText(f"QQ: {info}")
@@ -1428,12 +1231,7 @@ class MainWindow(QMainWindow):
             self.login_status_label.setText(f"状态: {info}")
             self.status_online.setText("离线")
             self.status_qq.setText("QQ: -")
-            # 快登失败降级扫码后，重置标志位并补渲染内联快登按钮
-            if self._quick_login_attempting and "快速登录失败" in info:
-                self._quick_login_attempting = False
-                self._quick_login_mode = False
-                if self._quick_login_accounts and self._napcat and self._napcat.is_running() and self._onebot is None:
-                    self._render_inline_quick_login_buttons(self._quick_login_accounts)
+            # 保持当前按钮状态不变（可能是快登中/扫码中）
 
     def _on_intersection_ready(self, joined_ids: set):
         """收到 bot 实际加入的群号集合"""
@@ -1544,8 +1342,7 @@ class MainWindow(QMainWindow):
 
         qq = getattr(self, "_pending_qq", "")
         self._napcat = NapCatManager(napcat_root)
-        saved_qq = self._config_mgr.config.qq_exe_path
-        if self._napcat.start(qq=qq, saved_qq_path=saved_qq):
+        if self._napcat.start(qq=qq):
             self._set_login_btn_mode("quick")
             if qq:
                 self.login_status_label.setText(f"状态: 正在快速登录 {qq}...")
@@ -1607,8 +1404,7 @@ class MainWindow(QMainWindow):
         self._login_retry_count += 1
         if self._login_retry_count < self._login_retry_max:
             if self._login_retry_count <= 5 or self._login_retry_count % 10 == 0:
-                err_hint = f" ({nickname})" if nickname and not ok else ""
-                self._append_log(f"[登录] 等待中... ({self._login_retry_count}/{self._login_retry_max}){err_hint}")
+                self._append_log(f"[登录] 等待中... ({self._login_retry_count}/{self._login_retry_max})")
             interval = 1000 if self._login_retry_count < 10 else 2000
             if self._onebot_mode == "external":
                 QTimer.singleShot(interval, self._do_external_poll_check)
@@ -1711,8 +1507,7 @@ class MainWindow(QMainWindow):
         self._config_mgr.save()
 
         self._napcat = NapCatManager(napcat_root)
-        saved_qq = self._config_mgr.config.qq_exe_path
-        if self._napcat.start(qq=qq, saved_qq_path=saved_qq):
+        if self._napcat.start(qq=qq):
             self._set_login_btn_mode("quick")
             self.login_status_label.setText(f"状态: 正在快速登录 {qq}...")
             self._login_retry_count = 0
@@ -1838,7 +1633,7 @@ class MainWindow(QMainWindow):
         napcat_root = self._config_mgr.config.napcat_path
         if napcat_root:
             self._napcat = NapCatManager(napcat_root)
-            if self._napcat.start(saved_qq_path=self._config_mgr.config.qq_exe_path):  # 不传 qq = 纯扫码
+            if self._napcat.start():  # 不传 qq = 纯扫码
                 self._set_login_btn_mode("quick")
                 self.login_status_label.setText("状态: 请扫码登录")
                 self._login_retry_count = 0
@@ -1871,8 +1666,8 @@ class MainWindow(QMainWindow):
         else:
             self.qr_label.setText("请点击下方按钮\n启动NapCat并登录")
         self.qr_label.setStyleSheet(
-            "border: 2px dashed #6a4040; border-radius: 10px;"
-            "font-size: 14px; color: #7a6a5a; background: transparent;"
+            "border: 2px dashed #8c959f; border-radius: 12px;"
+            "font-size: 14px; background: transparent;"
         )
         self.login_status_label.setText("状态: 未登录")
         self.status_online.setText("离线")
@@ -1945,321 +1740,6 @@ class MainWindow(QMainWindow):
         )
         self._send_worker.start()
 
-    # ---- 更新检查 ----
-    def _check_updates(self):
-        server = self._config_mgr.config.update_server or DEFAULT_SERVER
-        local_seq = self._config_mgr.config.last_synced_seq
-        self._update_checker = UpdateChecker(server, local_seq)
-        self._update_checker.finished.connect(self._on_update_result)
-        self._update_checker.start()
-
-    def _on_update_result(self, result: dict):
-        if result.get("error"):
-            self._append_log(f"[更新] {result['error']}")
-            # 即使CSV同步失败，仍检查是否有app版本更新
-            app_update = result.get("app_update")
-        else:
-            app_update = result.get("app_update")
-            changes = result.get("changes", [])
-            latest_seq = result.get("latest_seq", self._config_mgr.config.last_synced_seq)
-
-            if changes:
-                csv_path = self._config_mgr.config.csv_path
-                if not csv_path or not os.path.isfile(csv_path):
-                    self._append_log("[更新] 未找到本地CSV，跳过增量合并")
-                else:
-                    try:
-                        import csv as csv_module
-
-                        with open(csv_path, "r", encoding="utf-8-sig", newline="") as f:
-                            reader = csv_module.DictReader(f)
-                            fieldnames = reader.fieldnames
-                            existing = list(reader)
-
-                        gid_to_idx = {}
-                        for i, row in enumerate(existing):
-                            gid = row.get("群号", "").strip()
-                            if gid:
-                                gid_to_idx[gid] = i
-
-                        added = 0
-                        updated = 0
-
-                        for entry in changes:
-                            gid = entry.get("群号", "").strip()
-                            if not gid:
-                                continue
-                            row_data = {k: entry.get(k, "") for k in (fieldnames or []) if k != "seq"}
-                            if gid in gid_to_idx:
-                                existing[gid_to_idx[gid]] = row_data
-                                updated += 1
-                            else:
-                                existing.append(row_data)
-                                gid_to_idx[gid] = len(existing) - 1
-                                added += 1
-
-                        with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
-                            writer = csv_module.DictWriter(f, fieldnames=fieldnames)
-                            writer.writeheader()
-                            writer.writerows(existing)
-
-                        self._config_mgr.config.last_synced_seq = latest_seq
-                        self._config_mgr.save()
-
-                        from touhou_promoter.core.csv_loader import load_groups
-                        records = load_groups(csv_path)
-                        self._csv_records = records
-                        self._csv_groups = {r.group_id for r in records}
-                        self._intersection = self._csv_groups & self._joined_groups
-                        self._refresh_group_tree()
-                        self._append_log(
-                            f"[更新] 增量同步完成: +{added}条新增 / {updated}条更新, "
-                            f"本地seq={latest_seq}, 共{len(records)}条记录"
-                        )
-                    except Exception as e:
-                        self._append_log(f"[更新] 增量合并失败: {e}")
-
-        # ── 应用版本更新通知 ──
-        if app_update:
-            new_ver = app_update["version"]
-            self._pending_update = app_update
-            self._append_log(f"[更新] 发现新版本 v{new_ver}，当前 v{APP_VERSION}，请到 帮助→检查更新 下载")
-
-    # ── 应用更新 ──
-
-    def _ensure_updater(self):
-        """首次启动时从捆绑资源中提取 updater.exe 到 %APPDATA%"""
-        dest_dir = os.path.join(self._config_mgr.DIR, "updater")
-        dest = os.path.join(dest_dir, "updater.exe")
-        if os.path.exists(dest):
-            return
-        os.makedirs(dest_dir, exist_ok=True)
-        # PyInstaller onefile 模式下资源在 sys._MEIPASS（绝对路径）
-        if hasattr(sys, "_MEIPASS"):
-            src = os.path.join(sys._MEIPASS, "touhou_promoter", "assets", "updater.exe")
-        else:
-            # 开发模式：相对于 main_window.py 所在目录
-            src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "updater.exe")
-        if os.path.isfile(src):
-            shutil.copy2(src, dest)
-
-    def _on_check_app_update(self):
-        """手动检查应用更新（菜单触发）"""
-        updates = self._pending_update
-        if not updates:
-            QMessageBox.information(self, "检查更新", f"已是最新版本 v{APP_VERSION}")
-            return
-
-        new_ver = updates["version"]
-        dl_url = updates.get("download_url", "")
-        if not dl_url:
-            QMessageBox.warning(self, "检查更新", f"发现新版本 v{new_ver}，但下载地址不可用")
-            return
-
-        answer = QMessageBox.question(
-            self, "发现新版本",
-            f"当前版本: v{APP_VERSION}\n最新版本: v{new_ver}\n\n是否立即下载更新？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-
-        dest_dir = os.path.join(self._config_mgr.DIR, "updater")
-        os.makedirs(dest_dir, exist_ok=True)
-        dest = os.path.join(dest_dir, "原初电台.exe")
-
-        progress = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
-        progress.setWindowTitle("更新下载")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0)
-        progress.setValue(0)
-        progress.show()
-
-        try:
-            resp = requests.get(dl_url, stream=True, timeout=60)
-            resp.raise_for_status()
-            total = int(resp.headers.get("content-length", 0))
-            done = 0
-            with open(dest, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=65536):
-                    if progress.wasCanceled():
-                        f.close()
-                        try:
-                            os.remove(dest)
-                        except OSError:
-                            pass
-                        return
-                    f.write(chunk)
-                    done += len(chunk)
-                    if total:
-                        pct = int(done / total * 100)
-                        progress.setValue(pct)
-                        progress.setLabelText(f"正在下载更新... {done // 1048576}MB / {total // 1048576}MB")
-                    QApplication.processEvents()
-
-            progress.setValue(100)
-
-            # SHA256 完整性校验
-            expected = updates.get("sha256", "")
-            if expected:
-                progress.setLabelText("正在校验文件完整性...")
-                QApplication.processEvents()
-                actual = hashlib.sha256()
-                with open(dest, "rb") as f:
-                    for chunk in iter(lambda: f.read(65536), b""):
-                        actual.update(chunk)
-                if actual.hexdigest() != expected:
-                    progress.close()
-                    try:
-                        os.remove(dest)
-                    except OSError:
-                        pass
-                    QMessageBox.warning(self, "下载失败", "文件完整性校验失败，请稍后重试")
-                    return
-
-            self._ensure_updater()
-
-            updater_exe = os.path.join(self._config_mgr.DIR, "updater", "updater.exe")
-            if not os.path.isfile(updater_exe):
-                QMessageBox.warning(self, "更新失败", "找不到 updater.exe，请重新下载安装包")
-                return
-
-            old_exe = sys.executable
-            subprocess.Popen(
-                [updater_exe, f"{old_exe}|{dest}"],
-                creationflags=subprocess.DETACHED_PROCESS,
-            )
-            QApplication.quit()
-
-        except Exception as e:
-            progress.close()
-            QMessageBox.warning(self, "下载失败", f"下载更新失败: {e}")
-
-    # ---- 添加群聊 ----
-    def _on_add_group(self):
-        existing = {r.group_id: r.group_name for r in self._csv_records}
-        dlg = AddGroupDialog(self, server_url=self._config_mgr.config.update_server,
-                             existing_groups=existing)
-        if dlg.exec() != AddGroupDialog.DialogCode.Accepted:
-            return
-        entry = dlg.result()
-        if not entry:
-            return
-
-        gid = entry["群号"]
-        csv_path = self._config_mgr.config.csv_path
-        if not csv_path or not os.path.isfile(csv_path):
-            QMessageBox.warning(self, "提示", "请先加载CSV文件")
-            return
-
-        # 本地去重 — 这是唯一有效的审查
-        if gid in self._csv_groups:
-            QMessageBox.warning(self, "提示", f"群号 {gid} 已在列表中，请勿重复添加")
-            return
-
-        self._do_add_group(entry)
-
-    def _do_add_group(self, entry: dict):
-        """执行实际添加：写CSV + 更新内存 + 可选云端提交"""
-        gid = entry["群号"]
-        csv_path = self._config_mgr.config.csv_path
-        if not csv_path or not os.path.isfile(csv_path):
-            return
-
-        import csv as csv_module
-        with open(csv_path, "a", encoding="utf-8-sig", newline="") as f:
-            writer = csv_module.DictWriter(f, fieldnames=[
-                "大类", "地区/小类", "子类", "地点", "学校", "活动名",
-                "群号", "群名称", "说明",
-            ])
-            writer.writerow({
-                "大类": entry["大类"],
-                "地区/小类": entry["地区/小类"],
-                "子类": entry.get("子类", ""),
-                "地点": entry["地点"],
-                "学校": entry["学校"],
-                "活动名": entry["活动名"],
-                "群号": gid,
-                "群名称": entry["群名称"],
-                "说明": entry.get("说明", ""),
-            })
-
-        from touhou_promoter.core.group_model import GroupRecord
-        self._csv_records.append(GroupRecord(
-            category=entry["大类"],
-            region=entry["地区/小类"],
-            subcategory=entry.get("子类", ""),
-            location=entry["地点"],
-            school=entry["学校"],
-            event_name=entry["活动名"],
-            group_id=gid,
-            group_name=entry["群名称"],
-            note=entry.get("说明", ""),
-        ))
-        self._csv_groups.add(gid)
-        self._intersection = self._csv_groups & self._joined_groups
-        self._refresh_group_tree()
-
-        log_msg = f"[添加群聊] {gid} = {entry['群名称']}"
-
-        # 云端提交 — 在本地去重之后执行
-        if entry.get("_submit") == "cloud":
-            server = self._config_mgr.config.update_server
-            if server:
-                self._append_log(f"[添加群聊] 正在提交云端...")
-                QTimer.singleShot(0, lambda: self._submit_to_cloud(entry, gid, log_msg))
-                return
-
-        self._append_log(log_msg)
-
-    def _submit_to_cloud(self, entry: dict, gid: str, log_prefix: str):
-        """在后台线程中提交云端，避免阻塞 UI"""
-        from urllib.request import urlopen, Request
-        from urllib.error import URLError
-        import json as json_mod
-
-        class CloudSubmitWorker(QThread):
-            result_ready = pyqtSignal(bool, str)
-
-            def run(self):
-                try:
-                    payload = json_mod.dumps({
-                        "secret": "raiko-touhou-2026",
-                        "entry": {k: v for k, v in entry.items()
-                                  if not k.startswith("_") and k in (
-                                      "群号", "群名称", "大类", "地区/小类", "子类",
-                                      "地点", "学校", "活动名", "说明",
-                                  )},
-                    }, ensure_ascii=False).encode("utf-8")
-                    req = Request(
-                        f"{server}/api/submit",
-                        data=payload,
-                        headers={
-                            "Content-Type": "application/json; charset=utf-8",
-                            "User-Agent": "TouhouPromoter/1.0",
-                        },
-                    )
-                    with urlopen(req, timeout=15) as resp:
-                        data = json_mod.loads(resp.read().decode("utf-8"))
-                    if data.get("ok"):
-                        self.result_ready.emit(True, "")
-                    else:
-                        self.result_ready.emit(False, data.get("error", "未知错误"))
-                except URLError as e:
-                    self.result_ready.emit(False, f"网络错误: {e.reason}")
-                except Exception as e:
-                    self.result_ready.emit(False, str(e))
-
-        server = self._config_mgr.config.update_server
-        self._cloud_worker = CloudSubmitWorker()
-        self._cloud_worker.result_ready.connect(
-            lambda ok, err: self._append_log(
-                f"{log_prefix} — 已提交云端" if ok
-                else f"{log_prefix} — 云端提交失败: {err}"
-            )
-        )
-        self._cloud_worker.start()
-
     # ---- CSV ----
     def _on_load_csv(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -2290,10 +1770,6 @@ class MainWindow(QMainWindow):
 
         # 自动重新加载CSV（用户可能外部编辑了CSV文件）
         csv_path = self._config_mgr.config.csv_path
-        if not csv_path or not os.path.isfile(csv_path):
-            bundled = self._resolve_asset("东方QQ群列表.csv")
-            if os.path.isfile(bundled):
-                csv_path = bundled
         if csv_path and os.path.isfile(csv_path):
             try:
                 from touhou_promoter.core.csv_loader import load_groups
@@ -2442,7 +1918,7 @@ class MainWindow(QMainWindow):
         if not gid:
             return
         menu = QMenu(self)
-        copy_action = menu.addAction(f"复制群号: {gid}")
+        copy_action = menu.addAction(f"📋 复制群号: {gid}")
         info_action = menu.addAction(f"ℹ️ 查看详情")
 
         action = menu.exec(self.group_tree.mapToGlobal(pos))
@@ -2744,22 +2220,22 @@ class MainWindow(QMainWindow):
         self.progress_bar.setMaximum(total)
 
         if status == "sending":
-            self._append_log(f"> {group_name} ...")
+            self._append_log(f"→ {group_name} ...")
         elif status == "ok":
-            self._append_log(f"{group_name} - 成功", "success")
+            self._append_log(f"✓ {group_name} — 成功", "success")
         elif status == "ok(NT超时)":
-            self._append_log(f"{group_name} - 已发出(NT超时无法撤回)", "success")
+            self._append_log(f"✓ {group_name} — 已发出(NT超时无法撤回)", "success")
             self._nt_timeout_groups.append(group_name)
         elif status.startswith("fail:"):
             reason = status[5:]
-            self._append_log(f"{group_name} - {reason}", "error")
+            self._append_log(f"✗ {group_name} — {reason}", "error")
         elif status == "pausing":
-            self._append_log(f"{group_name}", "warning")
+            self._append_log(f"⏸ {group_name}", "warning")
         elif status.startswith("recall:ok"):
-            self._append_log(f"群{group_name} - 已撤回", "success")
+            self._append_log(f"✓ 群{group_name} — 已撤回", "success")
         elif status.startswith("recall:fail:"):
             reason = status[11:]
-            self._append_log(f"群{group_name} - {reason}", "error")
+            self._append_log(f"✗ 群{group_name} — {reason}", "error")
 
     def _on_send_completed(self, success: int, failed: int):
         """发送/撤回完成"""
@@ -2839,7 +2315,7 @@ class MainWindow(QMainWindow):
         target_gids = {gid for gid in self._last_sent_ids}
         self_id = self._config_mgr.config.last_self_id
 
-        self._append_log(f"发送后监听已启动（{duration}秒），监控目标群中的回复...", "info")
+        self._append_log(f"👂 发送后监听已启动（{duration}秒），监控目标群中的回复...", "info")
 
         self._post_listener = PostSendListener(
             target_group_ids=target_gids,
@@ -2848,7 +2324,7 @@ class MainWindow(QMainWindow):
         )
         self._post_listener.hit_detected.connect(self._on_listener_hit)
         self._post_listener.ws_error.connect(
-            lambda err: self._append_log(f"监听器错误: {err}", "error")
+            lambda err: self._append_log(f"👂 监听器错误: {err}", "error")
         )
         self._post_listener.finished.connect(self._on_listener_finished)
         self._post_listener.start()
@@ -2871,7 +2347,7 @@ class MainWindow(QMainWindow):
             if not group_name:
                 group_name = group_id
         preview = message[:80] + ('...' if len(message) > 80 else '')
-        self._append_log(f"群{group_name} {user_nick}: {preview}", "join")
+        self._append_log(f"👂 群{group_name} {user_nick}: {preview}", "join")
         if self._listener_panel:
             self._listener_panel.add_message(group_id, group_name, user_nick, message)
 
@@ -2879,9 +2355,9 @@ class MainWindow(QMainWindow):
         """监听结束"""
         hits = self._post_listener.hits() if self._post_listener else []
         if hits:
-            self._append_log(f"监听结束，共收到 {len(hits)} 条相关回复", "info")
+            self._append_log(f"👂 监听结束，共收到 {len(hits)} 条相关回复", "info")
         else:
-            self._append_log("监听结束，未收到相关回复", "info")
+            self._append_log("👂 监听结束，未收到相关回复", "info")
 
     def _on_listener_reply(self, group_id: str, text: str):
         """监听面板请求回复 → 调用 API 发送"""
@@ -2890,9 +2366,9 @@ class MainWindow(QMainWindow):
             from touhou_promoter.core.forwarding_engine import parse_message_to_segments
             segs = parse_message_to_segments(text)
             client.send_group_msg(group_id, segs, auto_escape=False)
-            self._append_log(f"回复群{group_id}: {text[:40]}", "success")
+            self._append_log(f"💬 回复群{group_id}: {text[:40]}", "success")
         except Exception as e:
-            self._append_log(f"回复失败: {e}", "error")
+            self._append_log(f"💬 回复失败: {e}", "error")
 
     def _send_btn_enabled(self, enabled: bool):
         """设置发送相关按钮状态"""
@@ -3036,30 +2512,13 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         QTimer.singleShot(0, self._position_editor_overlay)
 
-    def _resolve_asset(self, filename: str) -> str:
-        """返回资源文件的绝对路径（兼容 dev 和 PyInstaller onefile）"""
-        base = getattr(sys, '_MEIPASS', '')
-        if base:
-            p = os.path.join(base, 'touhou_promoter', 'assets', filename)
-        else:
-            pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            p = os.path.join(pkg_dir, 'assets', filename)
-        return os.path.normpath(p)
-
-    def _resolve_theme(self, theme_str: str) -> str:
-        """将 QSS 中的 {{placeholder}} 替换为运行时资源路径"""
-        asset_dir = os.path.dirname(self._resolve_asset("asanoha_bg.png"))
-        sd = asset_dir.replace('\\', '/')
-        return theme_str.replace("{{asanoha_light}}", f"{sd}/asanoha_bg.png") \
-                        .replace("{{asanoha_dark}}", f"{sd}/asanoha_bg_dark.png")
-
     def _refresh_overlay_theme(self):
         """主题切换时更新叠加标签背景色"""
         if not hasattr(self, '_editor_overlay') or not self._editor_overlay:
             return
-        bg = "rgba(36, 22, 20, 0.88)" if self._dark_mode else "rgba(255, 255, 255, 0.88)"
-        text_c = "#b8a898" if self._dark_mode else "#6a5040"
-        bold_c = "#f0e8e0" if self._dark_mode else "#2a1810"
+        bg = "rgba(22, 27, 34, 0.85)" if self._dark_mode else "rgba(246, 248, 250, 0.85)"
+        text_c = "#8b949e" if self._dark_mode else "#656d76"
+        bold_c = "#e6edf3" if self._dark_mode else "#1f2328"
         self._editor_overlay.setStyleSheet(
             f"QFrame#editorOverlay {{ background: {bg}; border-radius: 4px; }}"
         )
@@ -3089,11 +2548,11 @@ class MainWindow(QMainWindow):
         """切换深色/亮色主题"""
         self._dark_mode = not self._dark_mode
         if self._dark_mode:
-            self.setStyleSheet(self._resolve_theme(self._THEME))
-            self._theme_action.setText("切换亮色主题")
+            self.setStyleSheet(self._THEME)
+            self._theme_action.setText("☀ 切换亮色主题")
         else:
-            self.setStyleSheet(self._resolve_theme(self._THEME_LIGHT))
-            self._theme_action.setText("切换深色主题")
+            self.setStyleSheet(self._THEME_LIGHT)
+            self._theme_action.setText("🌙 切换深色主题")
         self._config_mgr.config.dark_mode = self._dark_mode
         self._config_mgr.save()
         self._rebuild_log_view()
@@ -3106,51 +2565,35 @@ class MainWindow(QMainWindow):
             self._listener_panel.set_dark_mode(self._dark_mode)
 
     def _on_about(self):
-        dlg = QDialog(self)
-        dlg.setWindowTitle("关于")
-        dlg.setMinimumWidth(420)
-        layout = QVBoxLayout(dlg)
-
-        label = QLabel(
-            f"原初电台 v{APP_VERSION}\n\n"
+        QMessageBox.about(
+            self, "关于",
+            "东方Project一键宣发姬 v1.0\n\n"
             "基于NapCat + OneBot v11的QQ群发工具\n"
             "开发: 没灵感的鼓 & 没人管的鼓\n\n"
-            "东方幻想指南网站：https://fantasyguide.cn/\n"
-            "东方人人人网站：https://thtripeople.ren/\n"
-            "特别鸣谢：碎月红楼、健胃小石片、摸不着头脑、逸明、上海龙教练，以及所有测试和反馈的朋友们\n\n"
+            "东方幻想指南网站：https://fantasyguide.cn/"
+            "东方人人人网站: https://thtripeople.ren/"
+            
         )
-        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        label.setOpenExternalLinks(True)
-        layout.addWidget(label)
-
-        btn = QPushButton("确定")
-        btn.clicked.connect(dlg.accept)
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        btn_layout.addWidget(btn)
-        layout.addLayout(btn_layout)
-
-        dlg.exec()
 
     # ================================================================
     # 工具
     # ================================================================
     COLOR_MAP_DARK = {
-        "info":    "#f0e8e0",
-        "success": "#5a9a5a",
-        "error":   "#d04040",
-        "warning": "#c09040",
-        "debug":   "#7a6a5a",
-        "join":    "#6090c0",
+        "info":    "#e6edf3",
+        "success": "#3fb950",
+        "error":   "#f85149",
+        "warning": "#d29922",
+        "debug":   "#8b949e",
+        "join":    "#58a6ff",
     }
 
     COLOR_MAP_LIGHT = {
-        "info":    "#2a1810",
-        "success": "#4a8040",
-        "error":   "#c03030",
-        "warning": "#a07030",
-        "debug":   "#9a8070",
-        "join":    "#5070a0",
+        "info":    "#1f2328",
+        "success": "#1a7f37",
+        "error":   "#cf222e",
+        "warning": "#9a6700",
+        "debug":   "#656d76",
+        "join":    "#0550ae",
     }
 
     @property
@@ -3164,7 +2607,7 @@ class MainWindow(QMainWindow):
             self._log_entries = self._log_entries[-600:]
 
         color = self._color_map.get(level, self._color_map["info"])
-        html = f'<span style="color:#7a6a5a">[{ts}]</span> ' \
+        html = f'<span style="color:#8b949e">[{ts}]</span> ' \
                f'<span style="color:{color}">{msg}</span>'
         self.log_view.append(html)
 
@@ -3189,6 +2632,6 @@ class MainWindow(QMainWindow):
         self.log_view.clear()
         for msg, level, ts in self._log_entries[-600:]:
             color = self._color_map.get(level, self._color_map["info"])
-            html = f'<span style="color:#7a6a5a">[{ts}]</span> ' \
+            html = f'<span style="color:#8b949e">[{ts}]</span> ' \
                    f'<span style="color:{color}">{msg}</span>'
             self.log_view.append(html)

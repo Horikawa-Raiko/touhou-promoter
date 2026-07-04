@@ -7,7 +7,7 @@ from touhou_promoter.version import APP_VERSION
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("东方Project一键宣发姬")
+    app.setApplicationName("原初电台")
     app.setApplicationVersion(APP_VERSION)
     app.setOrganizationName("touhou-promoter")
 

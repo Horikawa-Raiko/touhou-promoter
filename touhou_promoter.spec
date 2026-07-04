@@ -38,7 +38,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='东方Project一键宣发姬',
+    name='原初电台',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

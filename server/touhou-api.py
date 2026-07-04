@@ -1,4 +1,4 @@
-"""宣发姬云端同步 API — 增量同步 + 提交审核"""
+"""原初电台 云端同步 API — 增量同步 + 提交审核"""
 import json, os
 from datetime import datetime
 from flask import Flask, request, jsonify
@@ -159,9 +159,9 @@ def _rebuild_csv(changelog):
             "app_version": "1.0.0",
             "latest_seq": len(changelog),
             "csv_version": len(changelog),
-            "download_url": "https://s3.bitiful.net/raiko/download/%E4%B8%9C%E6%96%B9Project%E4%B8%80%E9%94%AE%E5%AE%A3%E5%8F%91%E5%A7%AC.exe",
+            "download_url": "https://s3.bitiful.net/raiko/download/%E5%8E%9F%E5%88%9D%E7%94%B5%E5%8F%B0.exe",
             "updater_url": "https://s3.bitiful.net/raiko/updater/updater.exe",
-            "sha256": "3c0b3fd7486e75ee94949f2731952b5df4a7034c97acd2efb4fe55507c75107f",
+            "sha256": "c9c0731bd6a22a1115f98099e6881572e3b4686063c4a1d07718d843c3a2f201",
         }, f, ensure_ascii=False)
 
 

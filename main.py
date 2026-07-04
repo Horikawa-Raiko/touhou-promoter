@@ -1,4 +1,4 @@
-"""东方Project一键宣发姬 — 入口"""
+"""原初电台 — 入口"""
 import sys
 from touhou_promoter.app import main
 

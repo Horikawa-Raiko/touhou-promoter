@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>东方Project一键宣发姬 — QQ群批量群发工具</title>
+<title>原初电台 — QQ群批量群发工具</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;600;700;900&display=swap');
 
@@ -335,13 +335,13 @@
 <header class="container">
   <span class="app-icon">&#x26E9;&#xFE0F;</span>
   <span class="badge">Touhou Project</span>
-  <h1>东方Project<span class="accent">一键宣发姬</span></h1>
+  <h1>原初<span class="accent">电台</span></h1>
   <p class="subtitle">
     为东方同人创作者打造的 QQ 群批量群发工具<br>
     扫码即用，一键触达 1800+ 东方群
   </p>
   <div class="btn-row">
-    <a href="https://s3.bitiful.net/raiko/download/%E4%B8%9C%E6%96%B9Project%E4%B8%80%E9%94%AE%E5%AE%A3%E5%8F%91%E5%A7%AC.exe" class="btn btn-primary btn-lg">
+    <a href="https://s3.bitiful.net/raiko/download/%E5%8E%9F%E5%88%9D%E7%94%B5%E5%8F%B0.exe" class="btn btn-primary btn-lg">
       <span class="icon">&#x2B07;</span> 下载 Windows 版
     </a>
     <a href="https://github.com/Horikawa-Raiko/touhou-promoter" class="btn btn-secondary">
@@ -390,7 +390,7 @@
     </div>
     <div class="step">
       <div class="step-num">2</div>
-      <h4>下载宣发姬</h4>
+      <h4>下载原初电台</h4>
       <p>从国内 CDN<br>下载最新 exe 到任意目录</p>
     </div>
     <div class="step">
@@ -425,7 +425,7 @@
     <span>&#x1FAA6;</span> 目前仅支持 Windows
   </div>
   <br>
-  <a href="https://s3.bitiful.net/raiko/download/%E4%B8%9C%E6%96%B9Project%E4%B8%80%E9%94%AE%E5%AE%A3%E5%8F%91%E5%A7%AC.exe" class="btn btn-primary btn-lg">
+  <a href="https://s3.bitiful.net/raiko/download/%E5%8E%9F%E5%88%9D%E7%94%B5%E5%8F%B0.exe" class="btn btn-primary btn-lg">
     <span class="icon">&#x2B07;</span> 下载最新版
   </a>
   <p class="version" id="app-version">加载中...</p>
@@ -444,23 +444,23 @@
     <div class="faq-item">
       <div class="faq-q"><span class="q-mark">Q</span> 启动报"未找到 QQ"但我明明装了 QQ</div>
       <div class="faq-a">
-        <p>宣发姬需要 <b>Electron 架构的新版 QQ</b>，旧版 Win32 QQ 不支持。</p>
+        <p>原初电台需要 <b>Electron 架构的新版 QQ</b>，旧版 Win32 QQ 不支持。</p>
         <p><b>下载前先自查：</b>打开 QQ，点击左下角菜单 &#x2192; 关于，查看版本号。目前已验证 <b>9.920 ~ 9.926</b> 均可正常使用。</p>
         <p>如果版本太旧（9.9.20 以下）或太新（超出 NapCat 兼容范围），请统一安装推荐版本：</p>
         <p><a href="https://dldir1.qq.com/qqfile/qq/QQNT/40d6045a/QQ9.9.26.44343_x64.exe" style="color:var(--gold-light);font-weight:700;">QQ9.9.26.44343_x64.exe</a></p>
         <p><b>安装后建议关闭 QQ 自动更新：</b>打开 QQ 设置 &#x2192; 软件更新，取消勾选"有更新时自动安装"。这样就不会因为自动升级导致版本超出兼容范围。</p>
-        <p>宣发姬会自动扫描 C/D/E 等所有盘符下的 QQ 安装位置，无需手动指定路径。</p>
+        <p>原初电台会自动扫描 C/D/E 等所有盘符下的 QQ 安装位置，无需手动指定路径。</p>
       </div>
     </div>
 
     <div class="faq-item">
       <div class="faq-q"><span class="q-mark">Q</span> 扫码登录正常但提示"等待超时"</div>
       <div class="faq-a">
-        <p>NapCat 已启动并显示二维码，但宣发姬连不上它的 HTTP 服务（5700 端口）。</p>
+        <p>NapCat 已启动并显示二维码，但原初电台连不上它的 HTTP 服务（5700 端口）。</p>
         <p>最常见原因：</p>
         <p>1. <b>QQ 进程残留</b> — 上次崩溃的 QQ 进程没杀干净，导致 NapCat 注入失败。可以复制以下命令到 PowerShell 中运行：</p>
         <p><code>taskkill /F /IM QQ.exe; taskkill /F /IM NapCatWinBootMain.exe</code></p>
-        <p>2. <b>Windows Defender 防火墙弹窗</b> — 第一次运行时 Windows 可能会弹框问"是否允许访问网络"。不过通常宣发姬和 QQ 同在本机回环通信，一般不触发防火墙。如果确实遇到弹窗，请点"允许"。</p>
+        <p>2. <b>Windows Defender 防火墙弹窗</b> — 第一次运行时 Windows 可能会弹框问"是否允许访问网络"。不过通常原初电台和 QQ 同在本机回环通信，一般不触发防火墙。如果确实遇到弹窗，请点"允许"。</p>
       </div>
     </div>
 
@@ -475,7 +475,7 @@
     <div class="faq-item">
       <div class="faq-q"><span class="q-mark">Q</span> 旧版 QQ 改的文件夹名含"QQNT"但实际不是</div>
       <div class="faq-a">
-        <p>有人会把旧版 QQ 的文件夹改名来骗过检测。宣发姬会通过以下方式识别真正的 Electron 版 QQ：</p>
+        <p>有人会把旧版 QQ 的文件夹改名来骗过检测。原初电台会通过以下方式识别真正的 Electron 版 QQ：</p>
         <p>1. 路径是否包含 "QQNT" 字样</p>
         <p>2. 目录下是否有 <code>QQNT.dll</code>、<code>wrapper.node</code>、<code>misc.bin</code> 等标记文件</p>
         <p>3. QQ.exe 的文件版本号 build &#x2265; 40000（Electron 版 QQ 的特有范围，旧版只有几百）</p>
@@ -486,16 +486,16 @@
     <div class="faq-item">
       <div class="faq-q"><span class="q-mark">Q</span> 可以手动添加群聊吗？</div>
       <div class="faq-a">
-        <p>可以！宣发姬支持<b>手动添加群聊</b>功能（菜单 &#x2192; 群列表 &#x2192; 添加群聊）。填写群号和分类信息后即可加入本地列表。</p>
-        <p>提交时选择<b>"添加到云端"</b>，你的群聊信息会提交给维护者审核，审核通过后所有宣发姬用户都能同步到。东方人多帮帮东方人，一起维护这份群列表 &#x1F338;</p>
-        <p><b>注意：</b>当前群列表数据来源于 THBWiki 自动爬取，分类体系并不完全匹配宣发姬的使用场景。后续会找时间彻底重新整理一版分类，敬请期待。</p>
+        <p>可以！原初电台支持<b>手动添加群聊</b>功能（菜单 &#x2192; 群列表 &#x2192; 添加群聊）。填写群号和分类信息后即可加入本地列表。</p>
+        <p>提交时选择<b>"添加到云端"</b>，你的群聊信息会提交给维护者审核，审核通过后所有原初电台用户都能同步到。东方人多帮帮东方人，一起维护这份群列表 &#x1F338;</p>
+        <p><b>注意：</b>当前群列表数据来源于 THBWiki 自动爬取，分类体系并不完全匹配原初电台的使用场景。后续会找时间彻底重新整理一版分类，敬请期待。</p>
       </div>
     </div>
 
     <div class="faq-item">
       <div class="faq-q"><span class="q-mark">Q</span> 群列表会自动更新吗？</div>
       <div class="faq-a">
-        <p>会的。宣发姬启动时会自动连接服务器，<b>增量同步</b>最新的群列表变更（类 Git 维护模式），只拉取有变化的部分，不重复下载完整 CSV。</p>
+        <p>会的。原初电台启动时会自动连接服务器，<b>增量同步</b>最新的群列表变更（类 Git 维护模式），只拉取有变化的部分，不重复下载完整 CSV。</p>
         <p>同时软件本身也内置了<b>自动更新检查</b>，在帮助菜单中也可以手动"检查更新"。有新版本时会在启动时提示，一键下载升级。</p>
       </div>
     </div>

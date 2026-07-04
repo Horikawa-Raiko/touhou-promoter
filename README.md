@@ -1,4 +1,4 @@
-# 东方Project一键宣发姬
+# 原初电台
 
 PyQt6 桌面应用，通过 NapCat（OneBot v11）一键向 QQ 群批量发送消息。
 
@@ -30,7 +30,7 @@ Mac/Linux 用户可使用「外部 OneBot 模式」，自行运行 [Lagrange.One
 
 ## 快速开始
 
-从 [Releases](../../releases) 下载最新 `东方Project一键宣发姬.exe`，双击运行。
+从 [Releases](../../releases) 下载最新 `原初电台.exe`，双击运行。
 
 首次启动时：
 
@@ -63,7 +63,7 @@ python main.py
 pyinstaller touhou_promoter.spec
 ```
 
-输出在 `dist/东方Project一键宣发姬.exe`（~40MB）。
+输出在 `dist/原初电台.exe`（~40MB）。
 
 ## 项目结构
 
