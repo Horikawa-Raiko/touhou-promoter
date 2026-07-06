@@ -51,5 +51,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='touhou_promoter/assets/app_icon.png',
+    icon='touhou_promoter/assets/app_icon.ico',
 )

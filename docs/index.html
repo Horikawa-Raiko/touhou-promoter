@@ -88,11 +88,9 @@
     text-decoration: none;
     display: flex; align-items: center; gap: 8px;
   }
-  nav .nav-logo .dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 8px var(--accent-glow);
+  nav .nav-logo img {
+    width: 28px; height: 28px;
+    border-radius: 6px;
   }
   nav .nav-cta {
     padding: 8px 20px;
@@ -115,6 +113,11 @@
     text-align: center;
     padding: 120px 24px 80px;
     position: relative;
+  }
+  .hero .hero-logo {
+    width: 180px; height: 180px;
+    border-radius: 28px;
+    margin-bottom: 36px;
   }
   .hero .badge {
     display: inline-flex; align-items: center; gap: 6px;
@@ -485,14 +488,14 @@
 
 <nav>
   <div class="nav-inner">
-    <a href="#" class="nav-logo"><span class="dot"></span>原初电台</a>
+    <a href="#" class="nav-logo"><img src="logo2.png" alt="原初电台">原初电台</a>
     <a href="#download" class="nav-cta">免费下载</a>
   </div>
 </nav>
 
 <header class="hero">
   <div class="container">
-    <div class="badge"><span class="live-dot"></span>Touhou Project</div>
+    <img class="hero-logo" src="logo2.png" alt="原初电台">
     <h1>原初<span class="accent">电台</span></h1>
     <p class="subtitle">
       为东方同人创作者打造的 QQ 群批量群发工具<br>扫码即用，一键触达 1800+ 东方群
@@ -638,15 +641,10 @@
     </div>
 
     <div class="faq-item">
-      <div class="faq-q"><span><span class="q-mark">Q</span> 这个软件安全吗？会偷看我的聊天记录吗？</span></div>
+      <div class="faq-q"><span><span class="q-mark">Q</span> 这个软件安全吗？会上传我的个人信息吗？</span></div>
       <div class="faq-a"><div class="faq-a-inner">
-        <p><b>绝对不会。</b>原初电台不会、也无法读取你的任何聊天记录。</p>
-        <p>软件获取的数据范围<b>仅限于</b>：</p>
-        <p>1. <b>QQ 登录凭证</b> — 完全由 NapCat 框架处理，扫码/快登均由 QQ 官方通道完成。原初电台<b>不接触</b>你的 QQ 密码，也不保存你的登录票据到任何云端。</p>
-        <p>2. <b>你加入的群列表</b> — 仅在加载群列表时调用 QQ API 获取"你加入了哪些群"（群号 + 群名），用于和内置 CSV 做交集匹配，确定哪些群可以发送。</p>
-        <p>3. <b>你提交的群信息</b> — 仅在你主动使用"添加到云端"功能时，才会把你填写的群号、群名等字段提交到服务器审核。</p>
-        <p><b>明确声明：</b>本软件<b>不读取、不截获、不上传、不存储</b>任何群聊消息、私聊消息、好友列表、聊天图片/文件。软件在群发后会监听 @Bot 消息和关键词回复，但<b>仅用于在软件界面上显示回复提醒</b>，不会把这些消息内容发到任何服务器。</p>
-        <p>所有云端同步操作均通过 HTTPS 加密传输，服务器仅存储群列表变更记录，不记录任何用户个人信息。</p>
+        <p><b>绝对不会。</b>原初电台不会、也无法上传你的任何个人信息。</p>
+        <p>软件上传到服务器的内容仅有<b>经过用户同意的群列表增量信息</b>，用途仅限于帮助所有用户同步完善群列表，除此之外任何软件运行过程中产生的数据均在本地完成处理。</p>
       </div></div>
     </div>
 
@@ -683,26 +681,6 @@
     </div>
 
     <div class="faq-item">
-      <div class="faq-q"><span><span class="q-mark">Q</span> 快速登录点完没有反应！</span></div>
-      <div class="faq-a"><div class="faq-a-inner">
-        <p>快速登录需要之前成功登录过一次，并且 QQ 服务器端保留了会话。如果换过设备、QQ 密码、或服务器端清除了会话，快登会失败。</p>
-        <p>此时 NapCat 会自动降级到二维码扫码模式，重新扫码登录一次即可恢复快登缓存。</p>
-      </div></div>
-    </div>
-
-    <div class="faq-item">
-      <div class="faq-q"><span><span class="q-mark">Q</span> 我移动过QQ的文件夹，软件识别得到吗？</span></div>
-      <div class="faq-a"><div class="faq-a-inner">
-        <p>有人会把 QQ 所在的文件夹改名、移动位置使得常规检测失效。本软件会通过以下方式识别真正的 Electron 版 QQ：</p>
-        <p>1. 路径是否包含 "QQNT" 字样</p>
-        <p>2. 目录下是否有 <code>QQNT.dll</code>、<code>wrapper.node</code>、<code>misc.bin</code> 等标记文件</p>
-        <p>3. QQ.exe 的文件版本号 build &#x2265; 40000（Electron 版 QQ 的特有范围，旧版只有几百）</p>
-        <p>三条满足其一就算识别通过，不必担心误判。</p>
-        <p>若您有以上操作行为且软件未能正确识别，建议卸载 QQ 并重新安装到规范路径。</p>
-      </div></div>
-    </div>
-
-    <div class="faq-item">
       <div class="faq-q"><span><span class="q-mark">Q</span> 为什么页面上说 1800+ 群，我的群列表里只有几十个？</span></div>
       <div class="faq-a"><div class="faq-a-inner">
         <p>群列表里显示的是两个来源的<b>交集</b>：</p>
@@ -718,24 +696,6 @@
         <p>可以！本软件支持<b>手动添加群聊</b>功能（菜单 &#x2192; 群列表 &#x2192; 添加群聊）。填写群号和分类信息后即可加入本地列表。</p>
         <p>提交时选择<b>"添加到云端"</b>，你的群聊信息会提交给维护者审核，审核通过后所有本软件的用户都能同步到。东方人帮帮东方人，一起维护这份群列表 &#x1F338;</p>
         <p><b>注意：</b>当前群列表数据来源于 THBWiki 自动爬取，分类体系并不完全匹配本软件的使用场景。后续有时间将彻底重新整理一版分类，敬请期待。</p>
-      </div></div>
-    </div>
-
-    <div class="faq-item">
-      <div class="faq-q"><span><span class="q-mark">Q</span> 群列表会自动更新吗？</span></div>
-      <div class="faq-a"><div class="faq-a-inner">
-        <p>会的。本软件启动时会自动连接服务器，<b>增量同步</b>最新的群列表变更，只拉取有变化的部分，不重复下载完整 CSV。</p>
-        <p>同时软件本身也内置了<b>自动更新检查</b>，在帮助菜单中也可以手动"检查更新"。有新版本时会在启动时提示，一键下载升级。</p>
-      </div></div>
-    </div>
-
-    <div class="faq-item">
-      <div class="faq-q"><span><span class="q-mark">Q</span> 后续主要更新方向是什么？</span></div>
-      <div class="faq-a"><div class="faq-a-inner">
-        <p>后续主要计划：</p>
-        <p>1. <b>重新设计群分类体系</b> — 当前分类来源于 THBWiki 爬取，并不完全匹配宣发场景。之后会找时间彻底重制一版，让分类更直观实用</p>
-        <p>2. <b>共享 Bot 账号</b> — 计划准备一个加满东方群的公共 QQ 号，作为"中心向宣发姬"。用户可以通过软件直接使用这个号来触达尽可能多的群，无需自己逐个加群</p>
-        <p>有其他想法欢迎加交流群反馈！</p>
       </div></div>
     </div>
 
