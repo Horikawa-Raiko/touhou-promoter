@@ -26,7 +26,7 @@ class AppConfig:
     onebot_http_url: str = "http://127.0.0.1:5700"  # 外部OneBot HTTP地址
     qq_exe_path: str = ""                    # 手动指定的 QQ.exe 路径（自动搜索失败时的回退）
     # 云端同步
-    update_server: str = "http://152.136.232.146"  # 更新服务器地址
+    update_server: str = "https://thpromoter.dismused-beat.cloud"  # 更新服务器地址
     last_synced_seq: int = 0                 # 本地已同步的最新 changelog seq，用于增量更新
 
 

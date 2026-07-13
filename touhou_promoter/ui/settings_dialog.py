@@ -46,7 +46,7 @@ class SettingsDialog(QDialog):
         cloud_form = QFormLayout(cloud_group)
 
         self._update_server = QLineEdit()
-        self._update_server.setPlaceholderText("http://152.136.232.146")
+        self._update_server.setPlaceholderText("https://thpromoter.dismused-beat.cloud")
         self._update_server.setToolTip("更新服务器地址，用于自动同步群列表和提交新群")
         cloud_form.addRow("服务器:", self._update_server)
 
@@ -125,7 +125,7 @@ class SettingsDialog(QDialog):
         self._onebot_url.setText(getattr(c, "onebot_http_url", "http://127.0.0.1:5700"))
         self._onebot_url.setEnabled(mode == "external")
 
-        self._update_server.setText(getattr(c, "update_server", "http://152.136.232.146"))
+        self._update_server.setText(getattr(c, "update_server", "https://thpromoter.dismused-beat.cloud"))
 
         self._send_interval.setValue(c.send_interval)
         self._send_jitter.setValue(c.send_interval_jitter)
@@ -138,7 +138,7 @@ class SettingsDialog(QDialog):
         c = self._config_mgr.config
         c.onebot_mode = self._onebot_mode.currentData()
         c.onebot_http_url = self._onebot_url.text().strip() or "http://127.0.0.1:5700"
-        c.update_server = self._update_server.text().strip() or "http://152.136.232.146"
+        c.update_server = self._update_server.text().strip() or "https://thpromoter.dismused-beat.cloud"
         c.send_interval = self._send_interval.value()
         c.send_interval_jitter = self._send_jitter.value()
         c.batch_pause_every = self._batch_every.value()

@@ -7,7 +7,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from touhou_promoter.version import APP_VERSION
 
 
-DEFAULT_SERVER = "http://152.136.232.146"
+DEFAULT_SERVER = "https://thpromoter.dismused-beat.cloud"
 
 
 def _parse_version(v: str) -> tuple:
