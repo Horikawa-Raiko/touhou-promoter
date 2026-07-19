@@ -30,7 +30,6 @@ class UpdateChecker(QThread):
     def run(self):
         result = {"changes": [], "latest_seq": self._local_seq, "app_update": None, "error": None}
 
-        # ── CSV 增量同步 ──
         try:
             req = Request(
                 f"{self._server}/api/changes?since={self._local_seq}",
@@ -39,6 +38,9 @@ class UpdateChecker(QThread):
             with urlopen(req, timeout=15) as resp:
                 vdata = json.loads(resp.read().decode("utf-8"))
 
+            result["latest_seq"] = vdata.get("latest_seq", self._local_seq)
+            result["changes"] = vdata.get("changes", [])
+
             remote_ver = vdata.get("app_version", "")
             if _parse_version(remote_ver) > _parse_version(APP_VERSION):
                 result["app_update"] = {
@@ -46,7 +48,7 @@ class UpdateChecker(QThread):
                     "download_url": vdata.get("download_url", ""),
                     "sha256": vdata.get("sha256", ""),
                 }
-        except Exception:
-            pass  # 版本检查失败不影响 CSV 同步
+        except Exception as e:
+            result["error"] = str(e)
 
         self.finished.emit(result)
