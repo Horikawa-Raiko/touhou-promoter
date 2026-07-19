@@ -8,10 +8,10 @@
 """
 
 import os
+import subprocess
 import zipfile
 import tempfile
 from typing import Optional
-from urllib.parse import urlparse
 
 import requests
 
@@ -49,9 +49,16 @@ def find_napcat_on_system() -> Optional[str]:
 # ---------- 下载 ----------
 
 def _get_download_urls() -> list[tuple[str, str]]:
-    """获取最新 NapCat 下载链接。返回 [(文件名, URL), ...]"""
+    """获取 NapCat 下载链接 [(文件名, URL), ...]。
+
+    优先走缤纷云 CDN，失败回退 GitHub API。
+    """
+    mirror_urls = _mirror_urls()
+    if mirror_urls:
+        return mirror_urls
+
     try:
-        resp = requests.get(NAPCAT_RELEASE_API, timeout=15)
+        resp = requests.get(NAPCAT_RELEASE_API, timeout=5)
         resp.raise_for_status()
         data = resp.json()
     except Exception:
@@ -63,35 +70,48 @@ def _get_download_urls() -> list[tuple[str, str]]:
         url = a.get("browser_download_url", "")
         if not name or not url:
             continue
-        # 只下载 Framework + Windows Shell
         if "Framework" in name or ("Shell" in name and "Windows" in name):
             assets.append((name, url))
 
     return assets if assets else _fallback_urls()
 
 
+def _mirror_urls() -> list[tuple[str, str]]:
+    """尝试从镜像 CDN 获取文件列表（HEAD 探测），失败返回空列表"""
+    filenames = [
+        "NapCat.Framework.zip",
+        "NapCat.Shell.Windows.OneKey.zip",
+    ]
+    result = []
+    for fn in filenames:
+        url = f"{NAPCAT_MIRROR_BASE}/{fn}"
+        try:
+            resp = requests.head(url, timeout=5)
+            if resp.status_code == 200:
+                result.append((fn, url))
+        except Exception:
+            pass
+    return result if len(result) == len(filenames) else []
+
+
 def _fallback_urls() -> list[tuple[str, str]]:
-    """硬编码回退 URL（v4.18.7）"""
-    base = "https://github.com/NapNeko/NapCatQQ/releases/download/v4.18.7"
+    """硬编码回退 URL（v4.18.9）"""
+    base = "https://github.com/NapNeko/NapCatQQ/releases/download/v4.18.9"
     return [
         ("NapCat.Framework.zip", f"{base}/NapCat.Framework.zip"),
         ("NapCat.Shell.Windows.OneKey.zip", f"{base}/NapCat.Shell.Windows.OneKey.zip"),
     ]
 
 
-def download_with_progress(url: str, dest: str, filename: str = "", progress_cb=None) -> bool:
-    """下载文件，可选进度回调 progress_cb(bytes_done, total_bytes)
-    优先从国内镜像服务器下载，失败后回退到 GitHub + ghproxy
-    """
-    urls_to_try = []
-    if filename and NAPCAT_MIRROR_BASE:
-        urls_to_try.append(f"{NAPCAT_MIRROR_BASE}/{filename}")
-    urls_to_try.append(url)  # GitHub 直连
-    urls_to_try.append(GHPROXY_PREFIX + url)  # ghproxy 镜像
+def download_with_progress(url: str, dest: str, progress_cb=None) -> bool:
+    """下载文件，可选进度回调 progress_cb(bytes_done, total_bytes)"""
+    urls_to_try = [url]
+    if GHPROXY_PREFIX not in url and "github.com" in url:
+        urls_to_try.append(GHPROXY_PREFIX + url)
 
     for download_url in urls_to_try:
         try:
-            resp = requests.get(download_url, stream=True, timeout=30)
+            resp = requests.get(download_url, stream=True, timeout=60)
             resp.raise_for_status()
             total = int(resp.headers.get("content-length", 0))
             done = 0
@@ -138,7 +158,7 @@ def install_napcat(target_dir: str, progress_cb=None, status_cb=None) -> bool:
             status_cb(f"正在下载 {filename} ...")
 
         dest = os.path.join(tmpdir, filename)
-        ok = download_with_progress(url, dest, filename=filename,
+        ok = download_with_progress(url, dest,
             progress_cb=lambda done, total: progress_cb and progress_cb(filename, done, total))
         if not ok:
             if status_cb:
@@ -184,24 +204,48 @@ def ensure_napcat_ready(
     3. %APPDATA%/touhou-promoter/napcat/ 已有安装
     4. 自动下载安装
 
-    Returns:
-        napcat_root 路径，失败返回 None
+    如果已有安装是旧版（v4.18.6-），自动删除并重新下载。
     """
+    import shutil
+
     # 1. 检查 app data 下的缓存安装
     cached = os.path.join(config_dir, "napcat")
     if os.path.isdir(cached):
         exe = find_napcat_executable(cached)
         if exe:
-            if status_cb:
-                status_cb("找到已安装的 NapCat")
-            return cached
+            # 检测旧版：napimain.exe 只在 v4.18.9+；NapCatWinBootMain.exe 在 bootmain/ 是新的
+            exe_name = os.path.basename(exe).lower()
+            in_bootmain = os.path.basename(os.path.dirname(exe)) == "bootmain"
+            is_old = (not in_bootmain and exe_name != "napimain.exe")
+            if is_old:
+                if status_cb:
+                    status_cb("检测到旧版 NapCat，正在升级...")
+                try:
+                    taskkill = subprocess.run(
+                        'taskkill /F /IM QQ.exe 2>nul & taskkill /F /IM NapCatWinBootMain.exe 2>nul',
+                        shell=True, capture_output=True, timeout=5,
+                    )
+                except Exception:
+                    pass
+                shutil.rmtree(cached, ignore_errors=True)
+            else:
+                if status_cb:
+                    status_cb("找到已安装的 NapCat")
+                return cached
 
     # 2. 搜索系统
     found = find_napcat_on_system()
     if found:
-        if status_cb:
-            status_cb(f"在系统中找到 NapCat: {found}")
-        return found
+        exe = find_napcat_executable(found)
+        if exe:
+            exe_name = os.path.basename(exe).lower()
+            in_bootmain = os.path.basename(os.path.dirname(exe)) == "bootmain"
+            is_old = (not in_bootmain and exe_name != "napimain.exe")
+            if not is_old:
+                if status_cb:
+                    status_cb(f"在系统中找到 NapCat: {found}")
+                return found
+            # 系统里找到的也是旧版 → 跳过，走自动安装
 
     # 3. 自动安装
     if status_cb:

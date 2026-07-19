@@ -213,16 +213,16 @@ def find_napcat_executable(napcat_root: str) -> Optional[str]:
 
     优先返回 .exe（可直接 Popen 跟踪进程），.bat 次之。
     """
-    # 优先 exe — 启动后 stdout 不会断
-    for name in ("NapCatWinBootMain.exe", "napcat.exe", "NapCat.exe"):
-        for sub in ("napcat", ""):
+    # 优先 exe — napimain.exe (v4.18.9+ 根目录), NapCatWinBootMain.exe (bootmain/), 旧版 fallback
+    for name in ("napimain.exe", "NapCatWinBootMain.exe", "napcat.exe", "NapCat.exe"):
+        for sub in ("", "bootmain", "napcat"):
             p = os.path.join(napcat_root, sub, name)
             if os.path.isfile(p):
                 return p
 
     # 回退 bat
     for name in ("launcher-user.bat", "launcher.bat", "launcher-win10-user.bat", "launcher-win10.bat"):
-        for sub in ("napcat", ""):
+        for sub in ("bootmain", "napcat", ""):
             p = os.path.join(napcat_root, sub, name)
             if os.path.isfile(p):
                 return p
