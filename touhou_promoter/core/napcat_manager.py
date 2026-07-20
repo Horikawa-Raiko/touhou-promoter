@@ -223,7 +223,7 @@ LOGIN_SUCCESS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 LOGIN_FAIL_PATTERN = re.compile(
-    r"(登录失败|login\s*fail|扫码超时|二维码.*过期|验证失败|账号.*冻结)",
+    r"(登录失败|login\s*fail|扫码超时|二维码.*过期|验证失败)",
     re.IGNORECASE,
 )
 LOGIN_BUSY_PATTERN = re.compile(
@@ -565,9 +565,9 @@ class NapCatManager:
 
     def _on_login_failed(self, reason: str):
         clean = re.sub(r"\x1b\[[0-9;]*m", "", reason).strip()
-        short = clean[:60] + "..." if len(clean) > 60 else clean
-        self._state.login_status_changed.emit(False, short)
-        self._state.napcat_status.emit(f"登录失败: {short}")
+        # 不直接展示原始行——可能包含 QQ 界面泄露的任意文字
+        self._state.login_status_changed.emit(False, "登录失败")
+        self._state.napcat_status.emit("登录失败，请重试扫码")
 
     def _on_login_busy(self, qq: str):
         """账号已在别处登录"""
