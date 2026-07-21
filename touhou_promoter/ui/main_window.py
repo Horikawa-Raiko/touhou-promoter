@@ -160,6 +160,18 @@ class ForwardListDialog(QDialog):
         self._intersection = intersection
         self._csv_records = csv_records
         self._dark_mode = dark_mode
+        # 麻叶纹背景路径
+        asset_dir = os.path.dirname(os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets")
+        ))
+        if not os.path.isdir(asset_dir):
+            # fallback: resolve from current working dir
+            for candidate in ["assets", "../assets", "../../assets"]:
+                test = os.path.normpath(os.path.join(os.getcwd(), candidate))
+                if os.path.isdir(test):
+                    asset_dir = test
+                    break
+        self._asanoha = os.path.join(asset_dir, "asanoha_bg_dark.png" if dark_mode else "asanoha_bg.png").replace("\\", "/")
         self.setWindowTitle("转发列表管理")
         self.setMinimumSize(960, 560)
         self.resize(1000, 600)
@@ -229,7 +241,8 @@ class ForwardListDialog(QDialog):
 
     def _build(self):
         c = self._c()
-        self.setStyleSheet(f"QDialog{{background:{c['dialog_bg']};}}")
+        asa = self._asanoha
+        self.setStyleSheet(f"QDialog{{background:{c['dialog_bg']};background-image:url({asa});}}")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -257,6 +270,8 @@ class ForwardListDialog(QDialog):
 
         # -- 左栏 --
         left_panel = QWidget()
+        left_panel.setObjectName("fld_left_panel")
+        left_panel.setStyleSheet("QWidget#fld_left_panel{background:transparent;}")
         left = QVBoxLayout(left_panel)
         left.setContentsMargins(16, 12, 8, 8)
 
@@ -296,6 +311,8 @@ class ForwardListDialog(QDialog):
 
         # -- 中栏 --
         mid_panel = QWidget()
+        mid_panel.setObjectName("fld_mid_panel")
+        mid_panel.setStyleSheet("QWidget#fld_mid_panel{background:transparent;}")
         mid = QVBoxLayout(mid_panel)
         mid.setContentsMargins(12, 12, 4, 8)
         mid_lbl = QLabel("可选群")
@@ -327,6 +344,8 @@ class ForwardListDialog(QDialog):
 
         # -- 箭头 --
         arrow_w = QWidget()
+        arrow_w.setObjectName("fld_arrow")
+        arrow_w.setStyleSheet("QWidget#fld_arrow{background:transparent;}")
         arrow_w.setFixedWidth(72)
         al = QVBoxLayout(arrow_w); al.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._add_btn = QPushButton("→")
@@ -345,6 +364,8 @@ class ForwardListDialog(QDialog):
 
         # -- 右栏 --
         right_panel = QWidget()
+        right_panel.setObjectName("fld_right_panel")
+        right_panel.setStyleSheet("QWidget#fld_right_panel{background:transparent;}")
         right = QVBoxLayout(right_panel)
         right.setContentsMargins(12, 12, 16, 8)
 
@@ -395,6 +416,7 @@ class ForwardListDialog(QDialog):
             f"QTableWidget{{alternate-background-color:{c['surface_alt']};}}"
             f"QTableWidget::indicator:checked{{background:{self.ACCENT};border:1px solid {self.ACCENT};border-radius:2px;}}"
             f"QTableWidget::indicator:unchecked{{border:1px solid {c['border']};border-radius:2px;background:transparent;}}"
+            "QTableWidget::item:focus{outline:none;border:none;}"
         )
         right.addWidget(self._right_table, 1)
         body.addWidget(right_panel, 4)
@@ -415,6 +437,7 @@ class ForwardListDialog(QDialog):
         )
         cancel_btn.clicked.connect(self.reject)
         footer.addWidget(cancel_btn)
+        footer.addSpacing(16)
         confirm_btn = QPushButton("确认")
         f = confirm_btn.font(); f.setPointSize(11); confirm_btn.setFont(f)
         confirm_btn.setStyleSheet(
@@ -3070,12 +3093,45 @@ class MainWindow(QMainWindow):
             remark = dlg.textValue().strip()
             self._list_store.set_remark(gid, remark)
             self._list_persistence.save(self._list_store)
+            checked = self._collect_checked_ids()
             self._refresh_group_tree()
+            self._restore_checked_ids(checked)
             self._update_selection_count()
             if remark:
                 self._append_log(f'[转发列表] 已为 {gid} 设置备注: "{remark}"')
             else:
                 self._append_log(f"[转发列表] 已清除 {gid} 的备注")
+
+    def _collect_checked_ids(self) -> set[str]:
+        """收集树控件中所有勾选的群号"""
+        result = set()
+        def _walk(parent):
+            for i in range(parent.childCount()):
+                child = parent.child(i)
+                if child.childCount() == 0:
+                    if child.checkState(0) == Qt.CheckState.Checked:
+                        gid = child.data(0, Qt.ItemDataRole.UserRole) or ""
+                        if gid:
+                            result.add(gid)
+                else:
+                    _walk(child)
+        _walk(self.group_tree.invisibleRootItem())
+        return result
+
+    def _restore_checked_ids(self, ids: set[str]):
+        """恢复树控件中指定群号的勾选状态"""
+        self._updating_checkboxes = True
+        def _walk(parent):
+            for i in range(parent.childCount()):
+                child = parent.child(i)
+                if child.childCount() == 0:
+                    gid = child.data(0, Qt.ItemDataRole.UserRole) or ""
+                    child.setCheckState(0, Qt.CheckState.Checked if gid in ids else Qt.CheckState.Unchecked)
+                else:
+                    _walk(child)
+                    self._update_parent_check_state(child)
+        _walk(self.group_tree.invisibleRootItem())
+        self._updating_checkboxes = False
 
     def _on_tree_context_menu(self, pos):
         """右键菜单"""
