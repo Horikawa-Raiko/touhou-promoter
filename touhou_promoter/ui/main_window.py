@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QLabel, QTreeWidget, QTreeWidgetItem, QTextEdit, QPushButton,
     QProgressBar, QPlainTextEdit, QStatusBar, QMessageBox, QGroupBox,
     QFileDialog, QScrollArea, QLineEdit, QMenu, QApplication, QDialog, QFrame,
-    QHeaderView, QProgressDialog, QTableWidget, QTableWidgetItem,
+    QHeaderView, QProgressDialog, QTableWidget, QTableWidgetItem, QInputDialog,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QIcon
@@ -153,27 +153,74 @@ class ForwardListDialog(QDialog):
     ACCENT_HOVER = "#d04040"
     ACCENT_PRESS = "#a03030"
 
-    def __init__(self, store, persistence, intersection: set, csv_records, parent=None):
+    def __init__(self, store, persistence, intersection: set, csv_records, dark_mode=False, parent=None):
         super().__init__(parent)
         self._store = store
         self._persistence = persistence
-        self._intersection = intersection      # set of group_id
-        self._csv_records = csv_records        # list of GroupRecord
+        self._intersection = intersection
+        self._csv_records = csv_records
+        self._dark_mode = dark_mode
         self.setWindowTitle("转发列表管理")
         self.setMinimumSize(960, 560)
         self.resize(1000, 600)
-        # 备份原始状态，取消时恢复
         import copy
         self._backup_active = store.active_list
         self._backup_lists = copy.deepcopy(store.lists)
         self._build()
+
+    def _c(self) -> dict:
+        """返回当前主题的色板"""
+        if self._dark_mode:
+            return dict(
+                dialog_bg="#1a0e0c",
+                text_primary="#f0e8e0", text_secondary="#b8a898", text_muted="#7a6a5a",
+                border="#4a3030", border_light="#302020",
+                surface="#241614", surface_alt="#201210", surface_input="#1a0e0c",
+                hover="#2d1c1a", selected="#3a1018",
+                cancel_bg="#241614", cancel_text="#b8a898", cancel_border="#4a3030",
+                trash_bg="#241614", trash_hover="#2d1c1a", trash_border="#6a4040",
+                header_bg="#241614", header_text="#c9a040",
+                sep="#4a3030", disabled_bg="#1a1010", disabled_text="#7a6a5a", disabled_border="#302020",
+                input_focus="#c04040",
+                confirm_text="#f0e8e0",
+                dlg_bg="#241614", dlg_input_bg="#1a0e0c", dlg_input_border="#4a3030", dlg_label="#b8a898",
+                dlg_btn_bg="#241614", dlg_btn_text="#b8a898", dlg_btn_border="#4a3030",
+            )
+        else:
+            return dict(
+                dialog_bg="#F7F7F7",
+                text_primary="#333", text_secondary="#666", text_muted="#999",
+                border="#E0E0E0", border_light="#EEE",
+                surface="#fff", surface_alt="#FAFAFA", surface_input="#fff",
+                hover="#F5EBE4", selected="#F0E0D8",
+                cancel_bg="#FFFFFF", cancel_text="#333", cancel_border="#D9D9D9",
+                trash_bg="#fff", trash_hover="#FFF1F0", trash_border="#E0C0C0",
+                header_bg="#FAFAFA", header_text="#666",
+                sep="#E0E0E0", disabled_bg="#F5F5F5", disabled_text="#CCC", disabled_border="#E8E8E8",
+                input_focus="#c04040",
+                confirm_text="#fff",
+                dlg_bg="#F7F7F7", dlg_input_bg="#fff", dlg_input_border="#D9D9D9", dlg_label="#666",
+                dlg_btn_bg="#fff", dlg_btn_text="#333", dlg_btn_border="#D9D9D9",
+            )
+
+    def _input_dialog_style(self) -> str:
+        c = self._c()
+        return (
+            f"QInputDialog{{background:{c['dlg_bg']};}}"
+            f"QLineEdit{{background:{c['dlg_input_bg']};border:1px solid {c['dlg_input_border']};"
+            f"border-radius:3px;padding:5px 8px;font-size:13px;color:{c['text_primary']};}}"
+            f"QLineEdit:focus{{border-color:{c['input_focus']};}}"
+            f"QLabel{{color:{c['dlg_label']};font-size:12px;}}"
+            f"QPushButton{{background:{c['dlg_btn_bg']};color:{c['dlg_btn_text']};"
+            f"border:1px solid {c['dlg_btn_border']};border-radius:4px;padding:4px 14px;font-size:12px;}}"
+            f"QPushButton:hover{{color:{self.ACCENT};border-color:{self.ACCENT};}}"
+        )
 
     @staticmethod
     def _is_default(name: str) -> bool:
         return name == ForwardListDialog.DEFAULT_LIST
 
     def _all_intersection_groups(self) -> dict[str, str]:
-        """CSV ∩ bot已加入群: {gid: group_name}"""
         result = {}
         for r in self._csv_records:
             if r.group_id in self._intersection:
@@ -181,25 +228,26 @@ class ForwardListDialog(QDialog):
         return result
 
     def _build(self):
-        self.setStyleSheet("QDialog{background:#F7F7F7;}")
+        c = self._c()
+        self.setStyleSheet(f"QDialog{{background:{c['dialog_bg']};}}")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── 顶栏: 标题 ──
+        # ── 顶栏 ──
         header = QHBoxLayout()
         header.setContentsMargins(20, 14, 20, 10)
         title = QLabel("转发列表管理")
         f = title.font(); f.setPointSize(15); title.setFont(f)
-        title.setStyleSheet("color:#333;font-weight:bold;")
+        title.setStyleSheet(f"color:{c['text_primary']};font-weight:bold;")
         header.addWidget(title)
         header.addStretch()
         root.addLayout(header)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color:#E0E0E0;")
+        sep.setStyleSheet(f"color:{c['sep']};")
         root.addWidget(sep)
 
         # ── 三栏主体 ──
@@ -207,7 +255,7 @@ class ForwardListDialog(QDialog):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        # -- 左栏: 转发列表 --
+        # -- 左栏 --
         left_panel = QWidget()
         left = QVBoxLayout(left_panel)
         left.setContentsMargins(16, 12, 8, 8)
@@ -215,7 +263,7 @@ class ForwardListDialog(QDialog):
         left_header = QHBoxLayout()
         left_lbl = QLabel("转发列表")
         f = left_lbl.font(); f.setPointSize(11); left_lbl.setFont(f)
-        left_lbl.setStyleSheet("color:#666;font-weight:bold;")
+        left_lbl.setStyleSheet(f"color:{c['text_secondary']};font-weight:bold;")
         left_header.addWidget(left_lbl)
         left_header.addStretch()
         new_btn = QPushButton("+ 新建")
@@ -233,10 +281,10 @@ class ForwardListDialog(QDialog):
         self._left_list.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
         self._left_list.setEditTriggers(QTreeWidget.EditTrigger.NoEditTriggers)
         self._left_list.setStyleSheet(
-            "QTreeWidget{border:none;background:transparent;font-size:13px;}"
-            "QTreeWidget::item{padding:5px 8px;border-radius:3px;}"
-            "QTreeWidget::item:hover{background:#F5EBE4;}"
-            "QTreeWidget::item:selected{background:#F0E0D8;color:#2a1810;}"
+            f"QTreeWidget{{border:none;background:transparent;font-size:13px;color:{c['text_primary']};}}"
+            f"QTreeWidget::item{{padding:5px 8px;border-radius:3px;}}"
+            f"QTreeWidget::item:hover{{background:{c['hover']};}}"
+            f"QTreeWidget::item:selected{{background:{c['selected']};color:{c['text_primary']};}}"
         )
         self._left_list.itemClicked.connect(self._on_left_clicked)
         self._left_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -244,58 +292,58 @@ class ForwardListDialog(QDialog):
         left.addWidget(self._left_list, 1)
         body.addWidget(left_panel, 2)
 
-        # 分割线
-        v1 = QFrame(); v1.setFrameShape(QFrame.Shape.VLine); v1.setStyleSheet("color:#E0E0E0;"); body.addWidget(v1)
+        v1 = QFrame(); v1.setFrameShape(QFrame.Shape.VLine); v1.setStyleSheet(f"color:{c['sep']};"); body.addWidget(v1)
 
-        # -- 中栏: 可选群（交集的补集，CSV三级树） --
+        # -- 中栏 --
         mid_panel = QWidget()
         mid = QVBoxLayout(mid_panel)
         mid.setContentsMargins(12, 12, 4, 8)
         mid_lbl = QLabel("可选群")
         f = mid_lbl.font(); f.setPointSize(11); mid_lbl.setFont(f)
-        mid_lbl.setStyleSheet("color:#666;font-weight:bold;")
+        mid_lbl.setStyleSheet(f"color:{c['text_secondary']};font-weight:bold;")
         self._mid_lbl = mid_lbl
         mid.addWidget(mid_lbl)
         self._mid_search = QLineEdit()
         self._mid_search.setPlaceholderText("搜索群名或群号...")
         self._mid_search.setClearButtonEnabled(True)
         self._mid_search.setStyleSheet(
-            "QLineEdit{background:#fff;border:1px solid #D9D9D9;border-radius:3px;padding:5px 8px;font-size:12px;}"
-            f"QLineEdit:focus{{border-color:{self.ACCENT};}}"
+            f"QLineEdit{{background:{c['surface_input']};color:{c['text_primary']};"
+            f"border:1px solid {c['border_light']};border-radius:3px;padding:5px 8px;font-size:12px;}}"
+            f"QLineEdit:focus{{border-color:{c['input_focus']};}}"
         )
         self._mid_search.textChanged.connect(self._on_mid_search)
         mid.addWidget(self._mid_search)
         self._mid_tree = QTreeWidget()
         self._mid_tree.setHeaderHidden(True)
         self._mid_tree.setStyleSheet(
-            "QTreeWidget{border:1px solid #EEE;background:#fff;border-radius:4px;font-size:13px;}"
-            "QTreeWidget::item{padding:3px 6px;border-bottom:1px solid #F5F5F5;}"
-            "QTreeWidget::item:hover{background:#F5EBE4;}"
-            "QTreeWidget::item:selected{background:#F0E0D8;color:#333;}"
+            f"QTreeWidget{{border:1px solid {c['border_light']};background:{c['surface']};"
+            f"border-radius:4px;font-size:13px;color:{c['text_primary']};}}"
+            f"QTreeWidget::item{{padding:3px 6px;border-bottom:1px solid {c['border_light']};}}"
+            f"QTreeWidget::item:hover{{background:{c['hover']};}}"
+            f"QTreeWidget::item:selected{{background:{c['selected']};color:{c['text_primary']};}}"
         )
         mid.addWidget(self._mid_tree, 1)
         body.addWidget(mid_panel, 3)
 
-        # -- 中→右 正方形箭头 --
+        # -- 箭头 --
         arrow_w = QWidget()
-        arrow_w.setFixedWidth(56)
+        arrow_w.setFixedWidth(72)
         al = QVBoxLayout(arrow_w); al.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._add_btn = QPushButton("→")
-        self._add_btn.setFixedSize(44, 44)
+        self._add_btn.setFixedSize(48, 48)
         self._add_btn.setStyleSheet(
             f"QPushButton{{background:{self.ACCENT};color:#fff;border:none;border-radius:4px;font-size:22px;font-weight:bold;}}"
             f"QPushButton:hover{{background:{self.ACCENT_HOVER};}}"
             f"QPushButton:pressed{{background:{self.ACCENT_PRESS};}}"
-            "QPushButton:disabled{background:#D9D9D9;color:#BCBCBC;}"
+            f"QPushButton:disabled{{background:{c['disabled_bg']};color:{c['disabled_text']};}}"
         )
         self._add_btn.clicked.connect(self._on_add_checked)
         al.addWidget(self._add_btn)
         body.addWidget(arrow_w)
 
-        # 分割线
-        v2 = QFrame(); v2.setFrameShape(QFrame.Shape.VLine); v2.setStyleSheet("color:#E0E0E0;"); body.addWidget(v2)
+        v2 = QFrame(); v2.setFrameShape(QFrame.Shape.VLine); v2.setStyleSheet(f"color:{c['sep']};"); body.addWidget(v2)
 
-        # -- 右栏: 当前列表中的群（平表） --
+        # -- 右栏 --
         right_panel = QWidget()
         right = QVBoxLayout(right_panel)
         right.setContentsMargins(12, 12, 16, 8)
@@ -303,19 +351,20 @@ class ForwardListDialog(QDialog):
         right_header = QHBoxLayout()
         right_lbl = QLabel("当前列表中的群")
         f = right_lbl.font(); f.setPointSize(11); right_lbl.setFont(f)
-        right_lbl.setStyleSheet("color:#666;font-weight:bold;")
+        right_lbl.setStyleSheet(f"color:{c['text_secondary']};font-weight:bold;")
         right_header.addWidget(right_lbl)
         right_header.addStretch()
         self._right_count = QLabel()
-        self._right_count.setStyleSheet("color:#999;font-size:11px;")
+        self._right_count.setStyleSheet(f"color:{c['text_muted']};font-size:11px;")
         right_header.addWidget(self._right_count)
         self._trash_btn = QPushButton(" 🗑 ")
         self._trash_btn.setMinimumWidth(40)
         self._trash_btn.setToolTip("删除右栏勾选的群")
         self._trash_btn.setStyleSheet(
-            f"QPushButton{{background:#fff;color:{self.ACCENT};border:1px solid #E0C0C0;border-radius:4px;font-size:16px;padding:4px 8px;}}"
-            f"QPushButton:hover{{background:#FFF1F0;border-color:{self.ACCENT};}}"
-            "QPushButton:disabled{background:#F5F5F5;color:#CCC;border-color:#E8E8E8;}"
+            f"QPushButton{{background:{c['trash_bg']};color:{self.ACCENT};"
+            f"border:1px solid {c['trash_border']};border-radius:4px;font-size:16px;padding:4px 8px;}}"
+            f"QPushButton:hover{{background:{c['trash_hover']};border-color:{self.ACCENT};}}"
+            f"QPushButton:disabled{{background:{c['disabled_bg']};color:{c['disabled_text']};border-color:{c['disabled_border']};}}"
         )
         self._trash_btn.clicked.connect(self._on_remove_selected)
         right_header.addWidget(self._trash_btn)
@@ -336,22 +385,23 @@ class ForwardListDialog(QDialog):
         self._right_table.setShowGrid(False)
         self._right_table.setAlternatingRowColors(True)
         self._right_table.setStyleSheet(
-            "QTableWidget{border:1px solid #EEE;background:#fff;border-radius:4px;font-size:13px;}"
-            "QTableWidget::item{padding:3px 6px;}"
-            "QTableWidget::item:hover{background:#F5EBE4;}"
-            "QTableWidget::item:selected{background:#F0E0D8;color:#333;}"
-            "QHeaderView::section{background:#FAFAFA;border:none;border-bottom:1px solid #E8E8E8;"
-            "padding:5px 8px;font-size:12px;color:#666;font-weight:bold;}"
-            "QTableWidget{alternate-background-color:#FAFAFA;}"
+            f"QTableWidget{{border:1px solid {c['border_light']};background:{c['surface']};"
+            f"border-radius:4px;font-size:13px;color:{c['text_primary']};}}"
+            f"QTableWidget::item{{padding:3px 6px;}}"
+            f"QTableWidget::item:hover{{background:{c['hover']};}}"
+            f"QTableWidget::item:selected{{background:{c['selected']};color:{c['text_primary']};}}"
+            f"QHeaderView::section{{background:{c['header_bg']};border:none;border-bottom:1px solid {c['border_light']};"
+            f"padding:5px 8px;font-size:12px;color:{c['header_text']};font-weight:bold;}}"
+            f"QTableWidget{{alternate-background-color:{c['surface_alt']};}}"
             f"QTableWidget::indicator:checked{{background:{self.ACCENT};border:1px solid {self.ACCENT};border-radius:2px;}}"
-            "QTableWidget::indicator:unchecked{border:1px solid #CCC;border-radius:2px;background:#fff;}"
+            f"QTableWidget::indicator:unchecked{{border:1px solid {c['border']};border-radius:2px;background:transparent;}}"
         )
         right.addWidget(self._right_table, 1)
         body.addWidget(right_panel, 4)
         root.addLayout(body, 1)
 
-        # ── 底栏: 关闭 / 确认 ──
-        bot_sep = QFrame(); bot_sep.setFrameShape(QFrame.Shape.HLine); bot_sep.setStyleSheet("color:#E0E0E0;")
+        # ── 底栏 ──
+        bot_sep = QFrame(); bot_sep.setFrameShape(QFrame.Shape.HLine); bot_sep.setStyleSheet(f"color:{c['sep']};")
         root.addWidget(bot_sep)
         footer = QHBoxLayout()
         footer.setContentsMargins(20, 10, 20, 12)
@@ -359,7 +409,8 @@ class ForwardListDialog(QDialog):
         cancel_btn = QPushButton("关闭")
         f = cancel_btn.font(); f.setPointSize(11); cancel_btn.setFont(f)
         cancel_btn.setStyleSheet(
-            "QPushButton{background:#FFFFFF;color:#333;border:1px solid #D9D9D9;border-radius:4px;padding:5px 14px;}"
+            f"QPushButton{{background:{c['cancel_bg']};color:{c['cancel_text']};"
+            f"border:1px solid {c['cancel_border']};border-radius:4px;padding:5px 14px;}}"
             f"QPushButton:hover{{color:{self.ACCENT};border-color:{self.ACCENT};}}"
         )
         cancel_btn.clicked.connect(self.reject)
@@ -367,10 +418,10 @@ class ForwardListDialog(QDialog):
         confirm_btn = QPushButton("确认")
         f = confirm_btn.font(); f.setPointSize(11); confirm_btn.setFont(f)
         confirm_btn.setStyleSheet(
-            f"QPushButton{{background:{self.ACCENT};color:#fff;border:none;border-radius:4px;padding:6px 16px;}}"
+            f"QPushButton{{background:{self.ACCENT};color:{c['confirm_text']};border:none;border-radius:4px;padding:6px 16px;}}"
             f"QPushButton:hover{{background:{self.ACCENT_HOVER};}}"
             f"QPushButton:pressed{{background:{self.ACCENT_PRESS};}}"
-            "QPushButton:disabled{background:#D9D9D9;color:#BCBCBC;}"
+            f"QPushButton:disabled{{background:{c['disabled_bg']};color:{c['disabled_text']};}}"
         )
         confirm_btn.clicked.connect(self.accept)
         footer.addWidget(confirm_btn)
@@ -508,7 +559,6 @@ class ForwardListDialog(QDialog):
         if not list_name:
             return
 
-        from PyQt6.QtWidgets import QInputDialog
         menu = QMenu(self)
 
         if not self._is_default(list_name):
@@ -524,9 +574,16 @@ class ForwardListDialog(QDialog):
         action = menu.exec(self._left_list.mapToGlobal(pos))
 
         if action == rename_action:
-            new_name, ok = QInputDialog.getText(self, "重命名列表", "新名称:", text=list_name)
-            if ok and new_name.strip() and new_name.strip() != list_name:
-                new_name = new_name.strip()
+            dlg = QInputDialog(self)
+            dlg.setWindowTitle("重命名列表")
+            dlg.setLabelText("新名称:")
+            dlg.setTextValue(list_name)
+            dlg.setInputMode(QInputDialog.InputMode.TextInput)
+            dlg.setStyleSheet(self._input_dialog_style())
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            new_name = dlg.textValue().strip()
+            if new_name and new_name != list_name:
                 if new_name in self._store.lists:
                     QMessageBox.warning(self, "错误", f'列表 "{new_name}" 已存在')
                 else:
@@ -588,10 +645,15 @@ class ForwardListDialog(QDialog):
         self._refresh_right()
 
     def _on_new(self):
-        from PyQt6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "新建转发列表", "列表名称:")
-        if ok and name.strip():
-            name = name.strip()
+        dlg = QInputDialog(self)
+        dlg.setWindowTitle("新建转发列表")
+        dlg.setLabelText("列表名称:")
+        dlg.setInputMode(QInputDialog.InputMode.TextInput)
+        dlg.setStyleSheet(self._input_dialog_style())
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        name = dlg.textValue().strip()
+        if name:
             if name in self._store.lists:
                 QMessageBox.warning(self, "错误", f'列表 "{name}" 已存在')
                 return
@@ -1567,6 +1629,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.select_all_btn)
         toolbar.addWidget(self.deselect_all_btn)
         toolbar.addWidget(self.refresh_groups_btn)
+        self.refresh_groups_btn.setEnabled(False)  # 登录后启用
         self.group_tree = QTreeWidget()
         self.group_tree.setHeaderLabels(["分类 / 群名称"])
         self.group_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -2346,6 +2409,9 @@ class MainWindow(QMainWindow):
         self._csv_records.clear()
         self.group_tree.clear()
         self.group_selection_label.setText("已选: 0 / 0 群")
+        self.select_all_btn.setEnabled(False)
+        self.deselect_all_btn.setEnabled(False)
+        self.refresh_groups_btn.setEnabled(False)
         self._append_log("[登录] 已退出登录")
 
         # 停 NapCat（保留 QQ 进程）
@@ -2475,7 +2541,7 @@ class MainWindow(QMainWindow):
                         self._csv_records = records
                         self._csv_groups = {r.group_id for r in records}
                         self._intersection = self._csv_groups & self._joined_groups
-                        self._refresh_group_tree()
+                        self._refresh_group_tree(select_all=True)
                         self._append_log(
                             f"[更新] 增量同步完成: +{added}条新增 / {updated}条更新, "
                             f"本地seq={latest_seq}, 共{len(records)}条记录"
@@ -2662,7 +2728,7 @@ class MainWindow(QMainWindow):
         ))
         self._csv_groups.add(gid)
         self._intersection = self._csv_groups & self._joined_groups
-        self._refresh_group_tree()
+        self._refresh_group_tree(select_all=True)
 
         log_msg = f"[添加群聊] {gid} = {entry['群名称']}"
 
@@ -2819,11 +2885,10 @@ class MainWindow(QMainWindow):
         self._worker.start()
         self._append_log("[群列表] 正在获取bot加入的群列表...")
 
-    def _refresh_group_tree(self):
+    def _refresh_group_tree(self, select_all=False):
         """重建群树：默认列表→三级树，自定义列表→平表"""
         self.group_tree.clear()
         if not self._intersection:
-            self.group_tree.addTopLevelItem(QTreeWidgetItem(["暂无交集群"]))
             self.group_selection_label.setText("已选: 0 / 0 群")
             self._sync_toolbar_for_list()
             return
@@ -2834,6 +2899,12 @@ class MainWindow(QMainWindow):
             self._build_group_tree_3level()
         else:
             self._build_group_tree_flat()
+
+        # 仅切换列表时自动全选
+        if select_all:
+            self._updating_checkboxes = True
+            self._set_all_check_state(self.group_tree.invisibleRootItem(), Qt.CheckState.Checked)
+            self._updating_checkboxes = False
 
         self._sync_toolbar_for_list()
         self._update_selection_count()
@@ -2875,7 +2946,7 @@ class MainWindow(QMainWindow):
         self._updating_checkboxes = False
 
     def _build_group_tree_flat(self):
-        """自定义列表模式：平表"""
+        """自定义列表模式：平表，带勾选框，显示备注名"""
         all_groups = {}
         for r in self._csv_records:
             if r.group_id in self._intersection:
@@ -2886,29 +2957,45 @@ class MainWindow(QMainWindow):
         rows.sort(key=lambda x: x[1])
 
         for gid, name in rows:
-            item = QTreeWidgetItem([f"{name} ({gid})"])
-            item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            display = self._list_store.display_name(gid, name)
+            item = QTreeWidgetItem([f"{display} ({gid})"])
+            item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            item.setCheckState(0, Qt.CheckState.Unchecked)
             item.setData(0, Qt.ItemDataRole.UserRole, gid)
             self.group_tree.addTopLevelItem(item)
 
     def _sync_toolbar_for_list(self):
-        """根据当前列表类型切换工具栏按钮"""
+        """根据当前列表类型切换工具栏按钮和标题"""
+        logged_in = self._onebot is not None
         is_default = self._list_store.get_active_name() == ForwardListDialog.DEFAULT_LIST
-        self.select_all_btn.setVisible(is_default)
-        self.deselect_all_btn.setVisible(is_default)
-        # 非默认列表时设置单列显示
-        if not is_default:
-            self.group_tree.setHeaderLabels(["群名称 (群号)"])
-        else:
+        list_name = self._list_store.get_active_name()
+
+        self.select_all_btn.setEnabled(logged_in)
+        self.deselect_all_btn.setEnabled(logged_in)
+        self.refresh_groups_btn.setEnabled(logged_in)
+
+        if not logged_in:
+            self.group_tree.setHeaderLabels(["群列表"])
+        elif is_default:
             self.group_tree.setHeaderLabels(["分类 / 群名称"])
+        else:
+            self.group_tree.setHeaderLabels([f"{list_name} — 群名称 (群号)"])
 
     def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int):
-        """复选框变化时传播到子/父节点"""
-        if self._list_store.get_active_name() != ForwardListDialog.DEFAULT_LIST:
-            return
+        """复选框变化时传播到子/父节点（三级树模式）"""
         if getattr(self, "_updating_checkboxes", False):
             return
         if column != 0:
+            return
+
+        is_default = self._list_store.get_active_name() == ForwardListDialog.DEFAULT_LIST
+        if not is_default:
+            # 平表模式：直接更新计数
+            self._update_selection_count()
             return
 
         self._updating_checkboxes = True
@@ -2938,8 +3025,6 @@ class MainWindow(QMainWindow):
 
     def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
         """点击叶子节点文本时也切换复选框（不只是点小方框）"""
-        if self._list_store.get_active_name() != ForwardListDialog.DEFAULT_LIST:
-            return
         if getattr(self, "_updating_checkboxes", False):
             return
         # 只对叶子节点生效
@@ -2954,6 +3039,44 @@ class MainWindow(QMainWindow):
         self._pre_click_item = None
         self._pre_click_state = None
 
+    def _on_edit_remark(self, gid: str):
+        """编辑列表中某群的备注名"""
+        current = self._list_store.get_remark(gid)
+        dark = self._dark_mode
+        bg = "#241614" if dark else "#F4F4F4"
+        input_bg = "#1a0e0c" if dark else "#fff"
+        input_border = "#4a3030" if dark else "#D9D9D9"
+        text_color = "#f0e8e0" if dark else "#333"
+        label_color = "#b8a898" if dark else "#666"
+        btn_bg = "#241614" if dark else "#fff"
+        btn_text = "#b8a898" if dark else "#333"
+        btn_border = "#4a3030" if dark else "#D9D9D9"
+        dlg = QInputDialog(self)
+        dlg.setWindowTitle("更改备注")
+        dlg.setLabelText(f"为群 {gid} 设置备注（留空则清除）:")
+        dlg.setTextValue(current)
+        dlg.setInputMode(QInputDialog.InputMode.TextInput)
+        dlg.setStyleSheet(
+            f"QInputDialog{{background:{bg};}}"
+            f"QLineEdit{{background:{input_bg};border:1px solid {input_border};"
+            f"border-radius:3px;padding:5px 8px;font-size:13px;color:{text_color};}}"
+            f"QLineEdit:focus{{border-color:#c04040;}}"
+            f"QLabel{{color:{label_color};font-size:12px;}}"
+            f"QPushButton{{background:{btn_bg};color:{btn_text};"
+            f"border:1px solid {btn_border};border-radius:4px;padding:4px 14px;font-size:12px;}}"
+            f"QPushButton:hover{{color:#c04040;border-color:#c04040;}}"
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            remark = dlg.textValue().strip()
+            self._list_store.set_remark(gid, remark)
+            self._list_persistence.save(self._list_store)
+            self._refresh_group_tree()
+            self._update_selection_count()
+            if remark:
+                self._append_log(f'[转发列表] 已为 {gid} 设置备注: "{remark}"')
+            else:
+                self._append_log(f"[转发列表] 已清除 {gid} 的备注")
+
     def _on_tree_context_menu(self, pos):
         """右键菜单"""
         item = self.group_tree.itemAt(pos)
@@ -2964,10 +3087,12 @@ class MainWindow(QMainWindow):
         is_default = self._list_store.get_active_name() == ForwardListDialog.DEFAULT_LIST
         menu = QMenu(self)
 
-        if is_default:
-            add_action = None
-        else:
+        if not is_default:
             remove_action = menu.addAction(f'从「{self._list_store.get_active_name()}」移除')
+            remark_action = menu.addAction("更改备注")
+        else:
+            remove_action = None
+            remark_action = None
         menu.addSeparator()
         copy_action = menu.addAction(f"复制群号: {gid}")
         info_action = menu.addAction("查看详情")
@@ -2976,9 +3101,11 @@ class MainWindow(QMainWindow):
         if not is_default and action == remove_action:
             self._list_store.remove_groups({gid})
             self._list_persistence.save(self._list_store)
-            self._refresh_group_tree()
+            self._refresh_group_tree(select_all=True)
             self._update_selection_count()
             self._append_log(f'[转发列表] 已从 "{self._list_store.get_active_name()}" 移除 "{name}"')
+        elif not is_default and action == remark_action:
+            self._on_edit_remark(gid)
         elif action == copy_action:
             QApplication.clipboard().setText(gid)
             self._append_log(f"已复制群号: {gid}")
@@ -3094,17 +3221,26 @@ class MainWindow(QMainWindow):
             parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
 
     def _update_selection_count(self):
-        """显示当前激活转发列表的群数量"""
-        count = self._list_store.get_active_count()
+        """统计当前树中勾选的群数量"""
+        def _count_checked(parent):
+            cnt = 0
+            for i in range(parent.childCount()):
+                child = parent.child(i)
+                if child.childCount() == 0:
+                    if child.checkState(0) == Qt.CheckState.Checked:
+                        cnt += 1
+                else:
+                    cnt += _count_checked(child)
+            return cnt
+
+        count = _count_checked(self.group_tree.invisibleRootItem())
         total = len(self._intersection)
         self._state.selection_changed.emit(count)
         self.group_selection_label.setText(f"已选: {count} / {total} 群")
         self.target_label.setText(f"目标群: {count}")
 
     def _on_select_all(self):
-        """全选所有交集群 — 仅默认列表有效"""
-        if self._list_store.get_active_name() != ForwardListDialog.DEFAULT_LIST:
-            return
+        """全选所有交集群"""
         if not self._intersection:
             return
         self._updating_checkboxes = True
@@ -3113,9 +3249,7 @@ class MainWindow(QMainWindow):
         self._update_selection_count()
 
     def _on_deselect_all(self):
-        """取消全选 — 仅默认列表有效"""
-        if self._list_store.get_active_name() != ForwardListDialog.DEFAULT_LIST:
-            return
+        """取消全选"""
         if not self._intersection:
             return
         self._updating_checkboxes = True
@@ -3139,17 +3273,21 @@ class MainWindow(QMainWindow):
 
     def _refresh_list_ui(self):
         """更新群树和选择计数标签"""
-        self._refresh_group_tree()
+        self._refresh_group_tree(select_all=True)
         self._update_selection_count()
 
     def _on_manage_lists(self):
         """打开转发列表管理弹窗"""
+        if self._onebot is None:
+            QMessageBox.information(self, "提示", "请先登录后再管理转发列表")
+            return
         dlg = ForwardListDialog(
             self._list_store, self._list_persistence,
-            self._intersection, self._csv_records, self
+            self._intersection, self._csv_records,
+            dark_mode=self._dark_mode, parent=self
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._refresh_group_tree()
+            self._refresh_group_tree(select_all=True)
             self._update_selection_count()
 
     # ---- 发送 ----
@@ -3261,12 +3399,15 @@ class MainWindow(QMainWindow):
         self._recall_worker.start()
 
     def _collect_checked_targets(self) -> list[tuple[str, str]]:
-        """返回当前激活转发列表的群，格式 [(group_id, group_name), ...]"""
+        """从树控件勾选状态收集目标群 [(group_id, display_name), ...]"""
         targets = []
-        for gid, name in self._list_store.get_active_targets().items():
-            if gid in self._intersection:
-                targets.append((gid, name))
-        return targets
+        self._collect_checked_recursive(self.group_tree.invisibleRootItem(), targets)
+        # 用备注名覆盖显示名
+        result = []
+        for gid, name in targets:
+            display = self._list_store.display_name(gid, name)
+            result.append((gid, display))
+        return result
 
     def _collect_checked_recursive(self, parent, targets: list):
         for i in range(parent.childCount()):

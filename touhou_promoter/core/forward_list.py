@@ -13,6 +13,7 @@ class ForwardListStore:
     """多个命名列表，每个列表是 {group_id: group_name} 的扁平字典"""
     active_list: str = "全部交集群"
     lists: dict[str, dict[str, str]] = field(default_factory=dict)
+    remarks: dict[str, str] = field(default_factory=dict)  # gid -> 用户备注名
 
     # ---- 列表 CRUD ----
 
@@ -76,6 +77,19 @@ class ForwardListStore:
     def has_group(self, group_id: str) -> bool:
         return group_id in self.get_active_targets()
 
+    def get_remark(self, group_id: str) -> str:
+        return self.remarks.get(group_id, "")
+
+    def set_remark(self, group_id: str, remark: str):
+        if remark.strip():
+            self.remarks[group_id] = remark.strip()
+        else:
+            self.remarks.pop(group_id, None)
+
+    def display_name(self, group_id: str, fallback: str) -> str:
+        """返回备注名（如果有）否则 fallback"""
+        return self.remarks.get(group_id, "") or fallback
+
     # ---- 默认列表自动填充 ----
 
     def sync_default_list(self, intersection: dict[str, str]):
@@ -105,6 +119,7 @@ class ForwardListPersistence:
             return ForwardListStore(
                 active_list=data.get("active_list", "全部交集群"),
                 lists=data.get("lists", {"全部交集群": {}}),
+                remarks=data.get("remarks", {}),
             )
         except (json.JSONDecodeError, TypeError):
             store = ForwardListStore()
@@ -116,4 +131,5 @@ class ForwardListPersistence:
             json.dump({
                 "active_list": store.active_list,
                 "lists": store.lists,
+                "remarks": store.remarks,
             }, f, indent=2, ensure_ascii=False)
