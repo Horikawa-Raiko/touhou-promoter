@@ -466,8 +466,12 @@ class NapCatManager:
         _log(f"NapCat 已启动 ({mode}) [PID={self._process.pid}]")
         return True
 
-    def stop(self):
-        """停止 NapCat 并清理整个进程树"""
+    def stop(self, kill_qq: bool = True):
+        """停止 NapCat 并清理进程树。
+
+        Args:
+            kill_qq: 是否同时结束 QQ.exe。关闭软件时传 False 保留 QQ。
+        """
         self._intentional_stop = True
         self._launcher_exited_ok = False
         if self._monitor:
@@ -496,7 +500,10 @@ class NapCatManager:
                             except Exception:
                                 pass
                         def kill_exes():
-                            for exe in ("napimain.exe", "NapCatWinBootMain.exe", "QQ.exe"):
+                            targets = ["napimain.exe", "NapCatWinBootMain.exe"]
+                            if kill_qq:
+                                targets.append("QQ.exe")
+                            for exe in targets:
                                 try:
                                     subprocess.run(
                                         f"taskkill /F /IM {exe}",
@@ -508,13 +515,14 @@ class NapCatManager:
                         t2 = threading.Thread(target=kill_exes)
                         t1.start(); t2.start()
                         t1.join(timeout=8); t2.join(timeout=8)
-                    try:
-                        subprocess.run(
-                            'taskkill /F /IM QQ.exe',
-                            shell=True, capture_output=True, timeout=5,
-                        )
-                    except Exception:
-                        pass
+                    if kill_qq:
+                        try:
+                            subprocess.run(
+                                'taskkill /F /IM QQ.exe',
+                                shell=True, capture_output=True, timeout=5,
+                            )
+                        except Exception:
+                            pass
                 else:
                     self._process.terminate()
                     try:
