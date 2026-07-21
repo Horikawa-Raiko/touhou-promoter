@@ -78,11 +78,9 @@ class ForwardListStore:
 
     # ---- 默认列表自动填充 ----
 
-    def ensure_default_populated(self, intersection: dict[str, str]):
-        """如果"全部交集群"为空，用交集填充"""
-        default = self.lists.setdefault("全部交集群", {})
-        if not default and intersection:
-            default.update(intersection)
+    def sync_default_list(self, intersection: dict[str, str]):
+        """始终用最新交集群覆盖"全部交集群" """
+        self.lists["全部交集群"] = dict(intersection)
 
 
 class ForwardListPersistence:
