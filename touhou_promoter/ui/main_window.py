@@ -153,25 +153,15 @@ class ForwardListDialog(QDialog):
     ACCENT_HOVER = "#d04040"
     ACCENT_PRESS = "#a03030"
 
-    def __init__(self, store, persistence, intersection: set, csv_records, dark_mode=False, parent=None):
+    def __init__(self, store, persistence, intersection: set, csv_records,
+                 dark_mode=False, asanoha_path="", parent=None):
         super().__init__(parent)
         self._store = store
         self._persistence = persistence
         self._intersection = intersection
         self._csv_records = csv_records
         self._dark_mode = dark_mode
-        # 麻叶纹背景路径
-        asset_dir = os.path.dirname(os.path.normpath(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets")
-        ))
-        if not os.path.isdir(asset_dir):
-            # fallback: resolve from current working dir
-            for candidate in ["assets", "../assets", "../../assets"]:
-                test = os.path.normpath(os.path.join(os.getcwd(), candidate))
-                if os.path.isdir(test):
-                    asset_dir = test
-                    break
-        self._asanoha = os.path.join(asset_dir, "asanoha_bg_dark.png" if dark_mode else "asanoha_bg.png").replace("\\", "/")
+        self._asanoha = asanoha_path
         self.setWindowTitle("转发列表管理")
         self.setMinimumSize(960, 560)
         self.resize(1000, 600)
@@ -242,7 +232,10 @@ class ForwardListDialog(QDialog):
     def _build(self):
         c = self._c()
         asa = self._asanoha
-        self.setStyleSheet(f"QDialog{{background:{c['dialog_bg']};background-image:url({asa});}}")
+        bg_css = f"background:{c['dialog_bg']};"
+        if asa and os.path.isfile(asa):
+            bg_css += f"background-image:url({asa.replace(chr(92), '/')});"
+        self.setStyleSheet(f"QDialog{{{bg_css}}}")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -2910,8 +2903,10 @@ class MainWindow(QMainWindow):
 
     def _refresh_group_tree(self, select_all=False):
         """重建群树：默认列表→三级树，自定义列表→平表"""
+        self._updating_checkboxes = True
         self.group_tree.clear()
         if not self._intersection:
+            self._updating_checkboxes = False
             self.group_selection_label.setText("已选: 0 / 0 群")
             self._sync_toolbar_for_list()
             return
@@ -2925,10 +2920,9 @@ class MainWindow(QMainWindow):
 
         # 仅切换列表时自动全选
         if select_all:
-            self._updating_checkboxes = True
             self._set_all_check_state(self.group_tree.invisibleRootItem(), Qt.CheckState.Checked)
-            self._updating_checkboxes = False
 
+        self._updating_checkboxes = False
         self._sync_toolbar_for_list()
         self._update_selection_count()
 
@@ -2945,7 +2939,6 @@ class MainWindow(QMainWindow):
         )
         PARENT_FLAGS = LEAF_FLAGS
 
-        self._updating_checkboxes = True
         for root in roots:
             item = QTreeWidgetItem([root.label])
             item.setFlags(PARENT_FLAGS)
@@ -2966,7 +2959,6 @@ class MainWindow(QMainWindow):
                     leaf_item.setCheckState(0, Qt.CheckState.Unchecked)
                     leaf_item.setData(0, Qt.ItemDataRole.UserRole, gid)
                     sub_item.addChild(leaf_item)
-        self._updating_checkboxes = False
 
     def _build_group_tree_flat(self):
         """自定义列表模式：平表，带勾选框，显示备注名"""
@@ -3279,18 +3271,21 @@ class MainWindow(QMainWindow):
     def _update_selection_count(self):
         """统计当前树中勾选的群数量"""
         def _count_checked(parent):
-            cnt = 0
+            checked = 0
+            total = 0
             for i in range(parent.childCount()):
                 child = parent.child(i)
                 if child.childCount() == 0:
+                    total += 1
                     if child.checkState(0) == Qt.CheckState.Checked:
-                        cnt += 1
+                        checked += 1
                 else:
-                    cnt += _count_checked(child)
-            return cnt
+                    c, t = _count_checked(child)
+                    checked += c
+                    total += t
+            return checked, total
 
-        count = _count_checked(self.group_tree.invisibleRootItem())
-        total = len(self._intersection)
+        count, total = _count_checked(self.group_tree.invisibleRootItem())
         self._state.selection_changed.emit(count)
         self.group_selection_label.setText(f"已选: {count} / {total} 群")
         self.target_label.setText(f"目标群: {count}")
@@ -3340,7 +3335,9 @@ class MainWindow(QMainWindow):
         dlg = ForwardListDialog(
             self._list_store, self._list_persistence,
             self._intersection, self._csv_records,
-            dark_mode=self._dark_mode, parent=self
+            dark_mode=self._dark_mode,
+            asanoha_path=self._resolve_asset("asanoha_bg_dark.png" if self._dark_mode else "asanoha_bg.png"),
+            parent=self
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._refresh_group_tree(select_all=True)
