@@ -65,8 +65,8 @@ class SendStateManager:
             finished=data.get("finished", False),
         )
 
-        # 已完成的不返回，让调用方清理
-        if session.finished or session.sent_index >= session.total_count:
+        # 已完成的清理：所有群都成功才算完成
+        if session.finished or session.success_count >= session.total_count:
             self.clear()
             return None
 

@@ -98,23 +98,23 @@ class SendWorker(QThread):
     # ── 回调 ──
 
     def _on_progress(self, current: int, total: int, group_name: str, status: str):
-        # 持久化每个成功的发送（包括NT超时 — 消息已发出但无法撤回）
+        # 持久化进度 — sent_index 始终等于循环位置，不管成功失败。
+        # 这样断点恢复时从下一个未处理的群开始，不会跳过中间的失败群。
+        state_mgr = SendStateManager()
+        session = state_mgr.load()
+        if session is None:
+            session = SendSession(
+                session_id=str(int(__import__("time").time())),
+                self_id=str(getattr(self._config, "last_self_id", "")),
+                message=self._message if isinstance(self._message, str) else str(self._message),
+                target_group_ids=[gid for gid, _ in self._targets],
+                total_count=total,
+            )
+        session.sent_index = current
         if (status == "ok" or status.startswith("ok(NT超时")) and self._engine:
-            state_mgr = SendStateManager()
-            session = state_mgr.load()
-            if session is None:
-                session = SendSession(
-                    session_id=str(int(__import__("time").time())),
-                    self_id=str(getattr(self._config, "last_self_id", "")),
-                    message=self._message if isinstance(self._message, str) else str(self._message),
-                    target_group_ids=[gid for gid, _ in self._targets],
-                    total_count=total,
-                )
-            # 更新进度
-            session.sent_index = current
             session.success_count = self._engine._sent_message_ids.__len__() if hasattr(self._engine, "_sent_message_ids") else current
             session.results[group_name] = {"status": "ok", "message_id": self._engine._sent_message_ids.get(group_name, "")}
-            state_mgr.save(session)
+        state_mgr.save(session)
 
         self._state.send_progress.emit(current, total, group_name, status)
 

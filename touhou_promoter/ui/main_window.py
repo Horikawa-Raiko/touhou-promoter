@@ -2622,21 +2622,23 @@ class MainWindow(QMainWindow):
             return
 
         self._pending_breakpoint_gids = []
-        self._append_log(f"[发送] 断点续传: 从第 {session.sent_index + 1} 个群继续...")
+        self._append_log(f"[发送] 断点续传: 已成功 {session.success_count}/{session.total_count}，继续未完成的...")
 
-        # 重建 targets
+        # 重建 targets：排除已成功发送的群，失败和未发的重试
+        ok_names = {name for name, info in session.results.items()
+                    if isinstance(info, dict) and info.get("status") == "ok"}
         targets = []
         for gid in session.target_group_ids:
-            # 从 csv_records 中找群名
             name = gid
             for r in self._csv_records:
                 if r.group_id == gid:
                     name = r.group_name or gid
                     break
-            targets.append((gid, name))
+            if name not in ok_names:
+                targets.append((gid, name))
 
         if not targets:
-            self._append_log("[发送] 无法重建目标列表，已清除会话")
+            self._append_log("[发送] 所有群已发送完成，清除会话")
             state_mgr.clear()
             return
 
@@ -2644,7 +2646,7 @@ class MainWindow(QMainWindow):
         self._send_worker = SendWorker(
             message=session.message,
             targets=targets,
-            start_index=session.sent_index,
+            start_index=0,  # targets已过滤，从0开始
         )
         self._send_worker.start()
 
