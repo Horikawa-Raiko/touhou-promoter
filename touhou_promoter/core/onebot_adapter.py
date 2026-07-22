@@ -44,10 +44,15 @@ def is_likely_offline_error(err_text: str) -> bool:
     if not text:
         return False
     keys = [
-        "offline", "not online", "connection", "connect", "timeout",
-        "timed out", "closed", "refused", "reset by peer", "network",
-        "unreachable", "disconnect", "not logged", "broken pipe",
-        "session is closed", "websocket",
+        "offline", "not online",
+        "connection refused", "connection reset", "connection closed",
+        "reset by peer", "broken pipe",
+        "unreachable", "network is unreachable",
+        "disconnect", "not logged",
+        "session is closed",
+        "[winerror 10061]",  # Windows: 由于目标计算机积极拒绝，无法连接
+        "websocket closed",
+        "no connection could be made",
     ]
     return any(k in text for k in keys)
 

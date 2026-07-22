@@ -219,7 +219,10 @@ class ForwardingEngine:
                         return False
                     failed += 1
                     if self.on_progress:
-                        self.on_progress(i + 1, total, group_name, "fail:连接失败(未发出)")
+                        if "Read timed out" in reason or "read timeout" in reason.lower():
+                            self.on_progress(i + 1, total, group_name, "fail:超时(未发出)")
+                        else:
+                            self.on_progress(i + 1, total, group_name, "fail:连接失败(未发出)")
                 else:
                     # ── 其他 API 错误 ──
                     failed += 1

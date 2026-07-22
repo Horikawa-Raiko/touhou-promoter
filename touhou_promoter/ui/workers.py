@@ -33,7 +33,7 @@ class SendWorker(QThread):
         self._message = message
         self._targets = targets
         self._start_index = start_index
-        self._client = client or OneBotHTTPClient()
+        self._client = client or OneBotHTTPClient(timeout=60.0)
         self._config = ConfigManager().config
 
         self._engine: Optional[ForwardingEngine] = None
@@ -150,7 +150,7 @@ class RecallWorker(QThread):
     ):
         super().__init__(parent)
         self._sent_ids = sent_message_ids
-        self._client = client or OneBotHTTPClient()
+        self._client = client or OneBotHTTPClient(timeout=60.0)
         self._config = ConfigManager().config
         self._engine: Optional[ForwardingEngine] = None
         self._state = AppState.instance()
