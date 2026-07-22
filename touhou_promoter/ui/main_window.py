@@ -3872,6 +3872,8 @@ class MainWindow(QMainWindow):
     def _insert_image_at_cursor(self, path: str):
         """将图片以base64嵌入QTextEdit当前光标处"""
         import base64 as _b64
+        import hashlib as _hashlib
+        import shutil as _shutil
         try:
             with open(path, "rb") as f:
                 data = f.read()
@@ -3879,13 +3881,27 @@ class MainWindow(QMainWindow):
         except Exception:
             self._append_log(f"[错误] 无法读取图片: {path}", "error")
             return
-        ext = os.path.splitext(path)[1].lower()
+
+        # 复制到持久化缓存，避免 QQ 重启后原始路径（如 QQ Ori/ 临时目录）失效
+        file_hash = _hashlib.md5(data).hexdigest()
+        ext = os.path.splitext(path)[1].lower() or ".png"
+        cache_dir = os.path.join(self._config_mgr.state_dir(), "image_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        cached_path = os.path.join(cache_dir, f"{file_hash}{ext}")
+        if not os.path.isfile(cached_path):
+            try:
+                _shutil.copy2(path, cached_path)
+            except Exception:
+                cached_path = path  # fallback to original
+        else:
+            pass  # reuse existing cache
+
         mime_map = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg",
                     ".gif": "gif", ".webp": "webp", ".bmp": "bmp"}
         mime = mime_map.get(ext, "png")
 
-        self._image_paths.append(path)
-        self._b64_to_path[b64] = path
+        self._image_paths.append(cached_path)
+        self._b64_to_path[b64] = cached_path
 
         cursor = self.message_edit.textCursor()
         cursor.insertHtml(
