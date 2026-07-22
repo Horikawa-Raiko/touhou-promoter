@@ -275,6 +275,7 @@ class NapCatMonitorThread(QThread):
         self._quick_login_detected = False
         self._account_buffer = ""
         self._collecting_accounts = False
+        self._onebot_ready_emitted = False
         self._napcat_dir = napcat_dir
 
     def run(self):
@@ -326,7 +327,8 @@ class NapCatMonitorThread(QThread):
         if KICKED_OFFLINE_PATTERN.search(line):
             self.kicked_offline.emit()
 
-        if ONEBOT_READY_PATTERN.search(line):
+        if not self._onebot_ready_emitted and ONEBOT_READY_PATTERN.search(line):
+            self._onebot_ready_emitted = True
             self.onebot_ready.emit(5700, 5701)
 
         self._detect_quick_login_accounts(line)
