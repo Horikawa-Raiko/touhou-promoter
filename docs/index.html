@@ -691,6 +691,23 @@
       </div></div>
     </div>
 
+    <div class="faq-item">
+      <div class="faq-q"><span><span class="q-mark">Q</span> 启动软件时我原本的 QQ 被退出了，正常吗？</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p><b>完全正常。</b>原初电台使用的 NapCat 框架需要将代码注入到 QQ 进程中才能工作。启动时会强制关闭所有正在运行的 QQ 进程，然后重新启动一个被你选择的账号登录的 QQ。</p>
+        <p>这不是 bug，是 NapCat 的工作原理。如果你日常需要使用 QQ 聊天，建议用另一个账号登录原初电台，或者在不用宣发的时候关掉软件重新登录自己的 QQ。</p>
+      </div></div>
+    </div>
+
+    <div class="faq-item">
+      <div class="faq-q"><span><span class="q-mark">Q</span> 登录的账号和我选的账号不一致</span></div>
+      <div class="faq-a"><div class="faq-a-inner">
+        <p>如果你缓存了多个账号（A 和 B），上次登录的是 A，这次选了 B 但实际登录的还是 A，这是因为 NapCat 的自动登录功能会优先使用上一次的登录状态。</p>
+        <p><b>解决方法：</b>在 QQ 的设置中关闭"自动登录"选项，清除 NapCat 目录下 <code>config/webui.json</code> 中的 <code>autoLoginAccount</code> 字段（或将其设为空字符串），然后重新启动软件扫码登录。</p>
+        <p>关闭自动登录后，QQ 每次启动都会弹出账号选择窗口，你手动选择哪个就是哪个，不会再出现错位。</p>
+      </div></div>
+    </div>
+
   </div>
 
   <div class="disclaimer reveal">
