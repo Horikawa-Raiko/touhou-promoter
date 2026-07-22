@@ -421,8 +421,12 @@ class NapCatManager:
 
         is_bat = launcher.lower().endswith(".bat")
 
-        # webui.json autoLoginAccount
-        set_auto_login_account(self._napcat_root, qq)
+        # autoLoginAccount 仅清除不写入。
+        # 原因：napimain.exe 命令行启动时不走 NapCat WebUI 的 autoLoginAccount 流，
+        # 写入反而可能触发 NapCat 后台自动化点击，与用户在 QQ 窗口的手动选号发生竞态。
+        # QQ 自身缓存登录状态，清理 autoLoginAccount 后 QQ 按自己的缓存弹出选号窗口。
+        if not qq:
+            set_auto_login_account(self._napcat_root, "")  # 清除，确保纯扫码
 
         # 生成/更新 OneBot 配置
         try:
