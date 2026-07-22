@@ -1487,6 +1487,7 @@ class MainWindow(QMainWindow):
         self._listener_panel: ListenerPanel | None = None
         self._image_paths: list[str] = []  # ordered list of image file paths
         self._b64_to_path: dict[str, str] = {}  # base64 data -> file path mapping
+        self._pending_breakpoint_gids: list[str] = []  # 断点续传时待勾选的群号
         self._dark_mode = self._config_mgr.config.dark_mode
         self._recalling = False                     # 撤回流程中，抑制 send_interrupted 的 UI 操作
         # OneBot 模式: "managed" = App管理NapCat进程 / "external" = 用户自启动
@@ -2042,6 +2043,9 @@ class MainWindow(QMainWindow):
                 self._append_log(f"[群列表] 已更新 {updated} 个群的名称")
 
         self._refresh_group_tree()
+        # 断点续传：自动勾选未发送的群
+        if self._pending_breakpoint_gids:
+            self._select_groups_in_tree(set(self._pending_breakpoint_gids))
         intersection_dict = {r.group_id: r.group_name for r in self._csv_records if r.group_id in self._intersection}
         self._list_store.sync_default_list(intersection_dict)
         self._list_persistence.save(self._list_store)
@@ -2561,15 +2565,20 @@ class MainWindow(QMainWindow):
         self._set_login_btn_mode("scan")
 
     def _check_breakpoint_resume(self):
-        """检测是否有未完成的发送会话，提示用户是否继续"""
+        """检测是否有未完成的发送会话，提示用户是否继续。
+
+        弹窗前先恢复消息内容和群选择范围，这样即使关掉弹窗也能手动继续。
+        """
         state_mgr = SendStateManager()
         session = state_mgr.load()
         if not session:
+            self._pending_breakpoint_gids = []
             return
 
         remaining = session.total_count - session.sent_index
         if remaining <= 0:
             state_mgr.clear()
+            self._pending_breakpoint_gids = []
             return
 
         # 检查是否同一账号
@@ -2577,7 +2586,15 @@ class MainWindow(QMainWindow):
         if session.self_id and current_self_id and session.self_id != current_self_id:
             # 不同账号的断点，自动清除
             state_mgr.clear()
+            self._pending_breakpoint_gids = []
             return
+
+        # 恢复消息内容到编辑器（弹窗之前，确保关了弹窗也能手动发）
+        self._restore_message_to_editor(session.message)
+
+        # 记录未发送的群号，等树建完后自动勾选
+        unsent_gids = session.target_group_ids[session.sent_index:]
+        self._pending_breakpoint_gids = [gid for gid in unsent_gids]
 
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("断点续传")
@@ -2586,7 +2603,8 @@ class MainWindow(QMainWindow):
             f"已发送: {session.sent_index} / {session.total_count} 群\n"
             f"剩余: {remaining} 群\n"
             f"消息: 「{session.message[:60]}{'...' if len(session.message) > 60 else ''}」\n\n"
-            f"是否继续发送？"
+            f"消息已恢复到编辑栏，未发送的群已勾选。\n"
+            f"是否立即继续发送？"
         )
         btn_continue = msg_box.addButton("继续发送", QMessageBox.ButtonRole.AcceptRole)
         btn_ignore = msg_box.addButton("忽略", QMessageBox.ButtonRole.DestructiveRole)
@@ -2597,12 +2615,13 @@ class MainWindow(QMainWindow):
         clicked = msg_box.clickedButton()
         if clicked == btn_ignore:
             state_mgr.clear()
-            self._append_log("[发送] 已忽略上次未完成的会话")
+            self._append_log("[发送] 已忽略上次未完成的会话（消息和群选择已保留）")
             return
         elif clicked != btn_continue:
-            self._append_log("[发送] 断点续传已取消，会话保留", "info")
+            self._append_log("[发送] 断点续传已取消，消息和群选择已保留", "info")
             return
 
+        self._pending_breakpoint_gids = []
         self._append_log(f"[发送] 断点续传: 从第 {session.sent_index + 1} 个群继续...")
 
         # 重建 targets
@@ -3611,6 +3630,24 @@ class MainWindow(QMainWindow):
         )
         self._recall_worker.start()
 
+    def _select_groups_in_tree(self, gids: set[str]):
+        """在群树中仅勾选指定群号（断点续传用），其余全部取消。"""
+        self._updating_checkboxes = True
+        self._set_all_check_state(self.group_tree.invisibleRootItem(), Qt.CheckState.Unchecked)
+        self._check_gids_recursive(self.group_tree.invisibleRootItem(), gids)
+        self._updating_checkboxes = False
+        self._update_selection_count()
+
+    def _check_gids_recursive(self, parent, gids: set[str]):
+        for i in range(parent.childCount()):
+            child = parent.child(i)
+            if child.childCount() == 0:
+                gid = child.data(0, Qt.ItemDataRole.UserRole) or ""
+                if gid in gids:
+                    child.setCheckState(0, Qt.CheckState.Checked)
+            else:
+                self._check_gids_recursive(child, gids)
+
     def _collect_checked_targets(self) -> list[tuple[str, str]]:
         """从树控件勾选状态收集目标群 [(group_id, display_name), ...]"""
         targets = []
@@ -3965,6 +4002,56 @@ class MainWindow(QMainWindow):
         if text.strip():
             parts.append(text.strip())
         return "".join(parts) if parts else ""
+
+    def _restore_message_to_editor(self, message: str):
+        """将 CQ 码格式的消息字符串恢复到编辑器（断点续传用）。
+
+        解析 [CQ:image,file=...] 和纯文本，重建编辑器的 HTML 内容。
+        """
+        import base64 as _b64
+        import re as _re
+
+        self._clear_message()
+        cursor = self.message_edit.textCursor()
+
+        img_re = _re.compile(r'\[CQ:image,file=([^\]]+)\]')
+        pos = 0
+        for m in img_re.finditer(message):
+            # CQ 码之前的纯文本
+            text = message[pos:m.start()]
+            if text:
+                cursor.insertText(text)
+
+            filepath = m.group(1).strip()
+            # 插入图片
+            if filepath and os.path.isfile(filepath):
+                try:
+                    with open(filepath, "rb") as f:
+                        data = f.read()
+                    b64 = _b64.b64encode(data).decode()
+                    ext = os.path.splitext(filepath)[1].lower()
+                    mime_map = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg",
+                                ".gif": "gif", ".webp": "webp", ".bmp": "bmp"}
+                    mime = mime_map.get(ext, "png")
+                    self._image_paths.append(filepath)
+                    self._b64_to_path[b64] = filepath
+                    cursor.insertHtml(
+                        f'<img src="data:image/{mime};base64,{b64}" '
+                        f'style="max-width:200px;border-radius:8px;margin:4px 2px" '
+                        f'title="{os.path.basename(filepath)}">'
+                    )
+                except Exception:
+                    cursor.insertText(f"[图片:{os.path.basename(filepath)}]")
+            else:
+                cursor.insertText(f"[图片丢失:{filepath}]")
+            pos = m.end()
+
+        # 尾部剩余文本
+        tail = message[pos:]
+        if tail:
+            cursor.insertText(tail)
+
+        # textChanged 信号会自动更新字数，无需手动调用
 
     # ---- 设置 ----
     def _on_napcat_path(self):
