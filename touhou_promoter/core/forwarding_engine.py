@@ -149,6 +149,10 @@ class ForwardingEngine:
         success = 0
         failed = 0
 
+        # 预解析消息段（只解析一次，后续可能替换图片URL）
+        segments: list[dict] = message if isinstance(message, list) else parse_message_to_segments(message)
+        _images_swapped = False  # 是否已将本地文件路径替换为CDN URL
+
         for i in range(start_index, total):
             if self._stop_flag:
                 if self.on_stopped:
@@ -161,19 +165,30 @@ class ForwardingEngine:
             if self.on_progress:
                 self.on_progress(i + 1, total, group_name, "sending")
 
-            # 调用 API 发送
-            # 纯文本字符串 → 解析 CQ 码后拆分为消息段数组
-            msg = message
-            if isinstance(msg, str):
-                msg = parse_message_to_segments(msg)
-
             try:
-                result = self._client.send_group_msg(group_id, msg, auto_escape=False)
+                result = self._client.send_group_msg(group_id, segments, auto_escape=False)
                 msg_id = str(result.get("message_id", ""))
                 self._sent_message_ids[group_id] = msg_id
                 success += 1
                 if self.on_progress:
                     self.on_progress(i + 1, total, group_name, "ok")
+
+                # 第一次图片发送成功后，从返回消息中提取 CDN URL，
+                # 后续群直接用URL发，避免重复上传同一张图
+                if not _images_swapped and msg_id:
+                    try:
+                        sent = self._client.get_msg(msg_id)
+                        sent_imgs = [s for s in sent.get("message", []) if s.get("type") == "image"]
+                        our_imgs = [s for s in segments if s.get("type") == "image" and
+                                    s.get("data", {}).get("file", "").startswith("file:///")]
+                        if sent_imgs and our_imgs:
+                            for our, snt in zip(our_imgs, sent_imgs):
+                                url = snt.get("data", {}).get("url", "")
+                                if url:
+                                    our["data"]["file"] = url
+                            _images_swapped = True
+                    except Exception:
+                        pass
             except OneBotAPIError as e:
                 reason = str(e)
                 # ── NT kernel 超时：消息 TCP 已发出，NT 未确认 ──
