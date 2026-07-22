@@ -63,6 +63,7 @@ class SendWorker(QThread):
         # 创建/更新会话状态
         session = SendSession(
             session_id=str(int(__import__("time").time())),
+            self_id=str(getattr(self._config, "last_self_id", "")),
             message=self._message if isinstance(self._message, str) else str(self._message),
             target_group_ids=[gid for gid, _ in self._targets],
             total_count=len(self._targets),
@@ -97,13 +98,14 @@ class SendWorker(QThread):
     # ── 回调 ──
 
     def _on_progress(self, current: int, total: int, group_name: str, status: str):
-        # 持久化每个成功的发送
-        if status == "ok" and self._engine:
+        # 持久化每个成功的发送（包括NT超时 — 消息已发出但无法撤回）
+        if (status == "ok" or status.startswith("ok(NT超时")) and self._engine:
             state_mgr = SendStateManager()
             session = state_mgr.load()
             if session is None:
                 session = SendSession(
                     session_id=str(int(__import__("time").time())),
+                    self_id=str(getattr(self._config, "last_self_id", "")),
                     message=self._message if isinstance(self._message, str) else str(self._message),
                     target_group_ids=[gid for gid, _ in self._targets],
                     total_count=total,
@@ -128,11 +130,10 @@ class SendWorker(QThread):
         self._state.send_completed.emit(success, failed)
 
     def _on_stopped(self, sent: int, total: int, sent_ids: dict[str, str]):
-        # 保存断点状态
+        # 保存断点状态 — sent_index 已由 _on_progress 维护正确的循环位置，不覆盖
         state_mgr = SendStateManager()
         session = state_mgr.load()
         if session:
-            session.sent_index = self._start_index + sent
             session.success_count = sent
             state_mgr.save(session)
         self._state.send_interrupted.emit(sent)

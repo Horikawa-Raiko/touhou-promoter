@@ -31,6 +31,7 @@ class AppState(QObject):
     onebot_ready = pyqtSignal(int, int)                  # (http_port, ws_port)
     quick_login_accounts = pyqtSignal(list)              # [(qq, nickname), ...]
     login_busy_detected = pyqtSignal(str)               # qq_number — 账号在别处登录
+    kicked_offline = pyqtSignal()                        # 账号被踢下线
 
     # 单例
     _instance: "AppState | None" = None

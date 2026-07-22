@@ -20,6 +20,7 @@ from typing import Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from touhou_promoter.core.napcat_config import (
+    ensure_bypass_config,
     generate_onebot_config,
     find_napcat_executable,
     set_auto_login_account,
@@ -246,6 +247,10 @@ QUICK_LOGIN_ACCOUNT_PATTERN = re.compile(
     r"^\s*(\d+)\.\s*(\d{5,15})\s+(.+)",
     re.MULTILINE,
 )
+KICKED_OFFLINE_PATTERN = re.compile(
+    r"(KickedOffLine|下线通知|kicked\s*offline|账号.*已失效|登录.*失效|kick.*off)",
+    re.IGNORECASE,
+)
 
 
 class NapCatMonitorThread(QThread):
@@ -259,6 +264,7 @@ class NapCatMonitorThread(QThread):
     login_busy = pyqtSignal(str)            # 账号已在别处登录 (qq_number)
     quick_login_accounts = pyqtSignal(list)  # [(qq, nickname), ...]
     onebot_ready = pyqtSignal(int, int)      # (http_port, ws_port)
+    kicked_offline = pyqtSignal()            # 账号被踢下线
     process_exited = pyqtSignal(int)         # 进程退出码
 
     def __init__(self, process: subprocess.Popen, parent=None, napcat_dir: str = ""):
@@ -316,6 +322,9 @@ class NapCatMonitorThread(QThread):
         if m:
             self.login_failed.emit(line)
             return
+
+        if KICKED_OFFLINE_PATTERN.search(line):
+            self.kicked_offline.emit()
 
         if ONEBOT_READY_PATTERN.search(line):
             self.onebot_ready.emit(5700, 5701)
@@ -424,6 +433,7 @@ class NapCatManager:
                 ws_port=self.WS_PORT,
                 reuse_existing=True,
             )
+            ensure_bypass_config(self._napcat_root)
         except Exception:
             pass
 
@@ -562,6 +572,7 @@ class NapCatManager:
         self._monitor.login_busy.connect(self._on_login_busy)
         self._monitor.quick_login_accounts.connect(self._on_quick_login_accounts)
         self._monitor.onebot_ready.connect(self._on_onebot_ready)
+        self._monitor.kicked_offline.connect(self._on_kicked_offline)
         self._monitor.process_exited.connect(self._on_process_exited)
         self._monitor_connected = True
 
@@ -583,6 +594,12 @@ class NapCatManager:
         self._state.napcat_status.emit(msg)
         self._state.login_busy_detected.emit(qq)
 
+    def _on_kicked_offline(self):
+        """账号被踢下线"""
+        self._state.napcat_status.emit("账号被踢下线，登录已失效")
+        self._state.login_status_changed.emit(False, "被踢下线")
+        self._state.kicked_offline.emit()
+
     def _on_quick_login_accounts(self, accounts: list):
         """检测到快速登录账号列表"""
         self._state.quick_login_accounts.emit(accounts)
@@ -601,6 +618,7 @@ class NapCatManager:
         self._state.onebot_ready.emit(http_port, ws_port)
 
     def _on_process_exited(self, rc: int):
+        was_connected = self._monitor_connected  # 在清零前记住：OneBot 之前是否已就绪
         self._process = None
         self._monitor_connected = False
         if self._intentional_stop:
@@ -611,6 +629,23 @@ class NapCatManager:
             self._launcher_exited_ok = False
             self._state.napcat_status.emit(f"NapCat 异常退出 (code={rc}) — 常见原因: QQ未安装/版本不兼容/被杀毒拦截")
             self._state.login_status_changed.emit(False, f"NapCat 异常退出 (code={rc})")
+        elif was_connected:
+            # OneBot 之前已就绪，现在进程退出 → QQ 被关掉了 → 立即离线
+            self._launcher_exited_ok = False
+            self._state.napcat_status.emit("QQ 已退出，连接丢失")
+            self._state.login_status_changed.emit(False, "QQ已退出")
         else:
-            self._launcher_exited_ok = True  # napimain 正常退出，QQ 仍在运行
+            self._launcher_exited_ok = True  # napimain 注入后正常退出，QQ 仍在运行，等 OneBot 就绪
             self._state.napcat_status.emit("NapCat 启动器已退出，等待 OneBot 就绪...")
+            # 15 秒后 OneBot 仍未就绪 → QQ 可能启动失败
+            from PyQt6.QtCore import QTimer
+            this = self
+
+            def _check_qq_gone():
+                if this._monitor_connected or this._process is not None:
+                    return
+                this._launcher_exited_ok = False
+                this._state.napcat_status.emit("QQ 启动失败，连接丢失")
+                this._state.login_status_changed.emit(False, "QQ启动失败")
+
+            QTimer.singleShot(15000, _check_qq_gone)

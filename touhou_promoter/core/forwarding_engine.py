@@ -176,13 +176,52 @@ class ForwardingEngine:
                     self.on_progress(i + 1, total, group_name, "ok")
             except OneBotAPIError as e:
                 reason = str(e)
-                # NapCat NT kernel 超时：消息实际已发出，仅确认回调丢失
-                # 重试会导致重复消息，直接计为成功
+                # ── NT kernel 超时：消息 TCP 已发出，NT 未确认 ──
                 if "Timeout" in reason and "NTEvent" in reason:
-                    success += 1
+                    # 尝试从错误中提取 message_id
+                    raw = getattr(e, "raw", None)
+                    nt_msg_id = ""
+                    if isinstance(raw, dict):
+                        nt_msg_id = str(raw.get("data", {}).get("message_id", ""))
+                    # 回查确认消息是否真的发出
+                    confirmed = False
+                    if nt_msg_id:
+                        try:
+                            verify = self._client.get_msg(nt_msg_id)
+                            if verify:
+                                confirmed = True
+                        except Exception:
+                            pass
+                    if confirmed:
+                        self._sent_message_ids[group_id] = nt_msg_id
+                        success += 1
+                        if self.on_progress:
+                            self.on_progress(i + 1, total, group_name, "ok(NT超时,已确认)")
+                    elif nt_msg_id:
+                        # 有 message_id 但回查失败 — 可能被风控静默屏蔽
+                        self._sent_message_ids[group_id] = nt_msg_id
+                        success += 1
+                        if self.on_progress:
+                            self.on_progress(i + 1, total, group_name, "ok(NT超时,状态不明)")
+                    else:
+                        # 没有 message_id — 只信任基本逻辑
+                        success += 1
+                        if self.on_progress:
+                            self.on_progress(i + 1, total, group_name, "ok(NT超时)")
+                # ── HTTP 连接失败：消息未发出 ──
+                elif "HTTP请求失败" in reason or "Connection" in reason or "Max retries" in reason:
+                    # 检查是否掉线
+                    if is_likely_offline_error(reason):
+                        if self.on_progress:
+                            self.on_progress(i + 1, total, group_name, "fail:连接断开(未发出)")
+                        if self.on_stopped:
+                            self.on_stopped(success, total, dict(self._sent_message_ids))
+                        return False
+                    failed += 1
                     if self.on_progress:
-                        self.on_progress(i + 1, total, group_name, "ok(NT超时)")
+                        self.on_progress(i + 1, total, group_name, "fail:连接失败(未发出)")
                 else:
+                    # ── 其他 API 错误 ──
                     failed += 1
                     if self.on_progress:
                         self.on_progress(i + 1, total, group_name, f"fail:API错误: {e}")

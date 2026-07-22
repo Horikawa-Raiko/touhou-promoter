@@ -811,6 +811,19 @@ class MainWindow(QMainWindow):
         background: #e83838;
         border-color: #e83838;
     }
+    QPushButton#stopSendBtn {
+        background: #fafafa;
+        border: 1px solid #d42020;
+        border-radius: 5px;
+        color: #d42020;
+        font-size: 12px;
+        padding: 6px 14px;
+    }
+    QPushButton#stopSendBtn:hover {
+        background: #fdf0f0;
+        border-color: #e83838;
+        color: #e83838;
+    }
     /* === 登录按钮 — 快登模式（金色） === */
     QPushButton#loginBtn[mode="quick"] {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1230,6 +1243,21 @@ class MainWindow(QMainWindow):
         color: #e0c060;
     }
 
+    /* === 终止发送按钮 === */
+    QPushButton#stopSendBtn {
+        background: #1a0808;
+        border: 1px solid #8b4040;
+        border-radius: 5px;
+        color: #e06060;
+        font-size: 12px;
+        padding: 6px 14px;
+    }
+    QPushButton#stopSendBtn:hover {
+        background: #2a1010;
+        border-color: #c04040;
+        color: #ff6060;
+    }
+
     /* === 快捷登录按钮 === */
     QPushButton[cssClass="quickLogin"] {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1454,7 +1482,7 @@ class MainWindow(QMainWindow):
         self._send_worker: SendWorker | None = None
         self._recall_worker: RecallWorker | None = None
         self._last_sent_ids: dict[str, str] = {}  # 上次发送的 message_id 映射
-        self._nt_timeout_groups: list[str] = []   # NT超时的群名，消息已发出但无可撤回的message_id
+        self._nt_timeout_groups: dict[str, str] = {}  # group_name → variant ("已确认"/"状态不明"/"")
         self._post_listener: PostSendListener | None = None
         self._listener_panel: ListenerPanel | None = None
         self._image_paths: list[str] = []  # ordered list of image file paths
@@ -1539,9 +1567,9 @@ class MainWindow(QMainWindow):
         # 停止监听线程
         self._stop_post_listener()
 
-        # NapCat 清理 — 只杀启动器，保留 QQ 进程
+        # NapCat 清理 — 连同 QQ 一起结束，避免 QQ 丢失注入 DLL 后卡死
         if self._napcat and self._onebot_mode == "managed":
-            self._napcat.stop(kill_qq=False)
+            self._napcat.stop(kill_qq=True)
             self._napcat = None
 
         super().closeEvent(event)
@@ -1701,8 +1729,14 @@ class MainWindow(QMainWindow):
         self.recall_btn = QPushButton("撤回")
         self.recall_btn.setObjectName("recallBtn")
         self.recall_btn.clicked.connect(self._on_recall_clicked)
+        self.stop_send_btn = QPushButton("终止")
+        self.stop_send_btn.setObjectName("stopSendBtn")
+        self.stop_send_btn.setToolTip("终止当前正在进行的发送/撤回任务")
+        self.stop_send_btn.clicked.connect(self._on_stop_send_clicked)
+        self.stop_send_btn.setEnabled(False)
         me_btn_row.addWidget(self.send_btn)
         me_btn_row.addWidget(self.recall_btn)
+        me_btn_row.addWidget(self.stop_send_btn)
 
         # 编辑区右下角叠加标签（浮在文本上方）
         self._editor_overlay = QFrame(self.message_edit.viewport())
@@ -1815,6 +1849,7 @@ class MainWindow(QMainWindow):
         st.send_progress.connect(self._on_send_progress)
         st.send_completed.connect(self._on_send_completed)
         st.send_interrupted.connect(self._on_send_interrupted)
+        st.kicked_offline.connect(self._on_kicked_offline)
 
     def _on_onebot_ready(self, http_port: int, ws_port: int):
         """OneBot 适配器已就绪 — 立即触发一次登录检测（不等轮询周期）"""
@@ -1922,7 +1957,7 @@ class MainWindow(QMainWindow):
                 "border: 2px solid #c09040; border-radius: 10px;"
                 "font-size: 14px; color: #c09040; background: transparent;"
             )
-        elif "已退出" in status:
+        elif "已退出" in status and "启动器已退出" not in status:
             self.qr_label.setText("NapCat\n已退出")
             self.qr_label.setStyleSheet(
                 "border: 2px dashed #6a4040; border-radius: 10px;"
@@ -1969,18 +2004,24 @@ class MainWindow(QMainWindow):
             self._auto_refresh_intersection()
             self._check_breakpoint_resume()
         else:
-            self.login_status_label.setText(f"状态: {info}")
-            self.status_online.setText("离线")
-            self.status_qq.setText("QQ: -")
-            # 快登失败降级扫码后，重置标志位并补渲染内联快登按钮
+            # 快登失败降级扫码 → 特殊处理，不重置整个UI
             if self._quick_login_attempting and "快速登录失败" in info:
+                self.login_status_label.setText(f"状态: {info}")
+                self.status_online.setText("离线")
+                self.status_qq.setText("QQ: -")
                 self._quick_login_attempting = False
                 self._quick_login_mode = False
                 if self._quick_login_accounts and self._napcat and self._napcat.is_running() and self._onebot is None:
                     self._render_inline_quick_login_buttons(self._quick_login_accounts)
+            elif "被踢下线" in info or "异常退出" in info:
+                # _enter_offline_ui 已由 _on_kicked_offline / _on_setup_failed 处理
+                pass
+            else:
+                # 其他离线原因 → 完整离线UI
+                self._enter_offline_ui(info)
 
-    def _on_intersection_ready(self, joined_ids: set):
-        """收到 bot 实际加入的群号集合"""
+    def _on_intersection_ready(self, joined_ids: set, bot_names: dict = None):
+        """收到 bot 实际加入的群号集合，用bot返回的最新群名更新CSV记录（不覆盖备注）"""
         self._joined_groups = joined_ids
         self._intersection = self._csv_groups & joined_ids
         self._append_log(
@@ -1988,6 +2029,18 @@ class MainWindow(QMainWindow):
             f"bot已加入{len(joined_ids)}个群, "
             f"交集{len(self._intersection)}个群"
         )
+
+        # 用 bot 返回的最新群名更新 csv_records
+        if bot_names:
+            updated = 0
+            for r in self._csv_records:
+                fresh_name = bot_names.get(r.group_id, "")
+                if fresh_name and fresh_name != r.group_name:
+                    r.group_name = fresh_name
+                    updated += 1
+            if updated > 0:
+                self._append_log(f"[群列表] 已更新 {updated} 个群的名称")
+
         self._refresh_group_tree()
         intersection_dict = {r.group_id: r.group_name for r in self._csv_records if r.group_id in self._intersection}
         self._list_store.sync_default_list(intersection_dict)
@@ -2108,7 +2161,18 @@ class MainWindow(QMainWindow):
         """启动登录轮询 — 自适应间隔：前10次1s，之后2s"""
         if not getattr(self, "_login_poll_active", True):
             return
-        if not self._napcat or not self._napcat.is_running():
+        if not self._napcat:
+            return
+
+        # napimain 注入完毕已退出，但 OneBot 仍未就绪 → QQ 可能崩了
+        launched_ok = getattr(self._napcat, "_launcher_exited_ok", False)
+        process_dead = self._napcat._process is None
+        if not self._napcat.is_running() or (process_dead and launched_ok and self._login_retry_count > 8):
+            self._login_poll_active = False
+            self.login_status_label.setText("状态: QQ启动失败")
+            self.login_btn.setEnabled(True)
+            self._set_login_btn_mode("scan")
+            self._append_log("[登录] QQ 可能已崩溃，OneBot 未就绪，请重试", "error")
             return
 
         class LoginCheckWorker(QThread):
@@ -2160,7 +2224,10 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(interval, self._start_login_poll)
         else:
             self._append_log(f"[登录] 超时：{self._login_retry_max}次尝试后仍未连接")
+            self._login_poll_active = False
+            self.login_status_label.setText("状态: 连接超时")
             self.login_btn.setEnabled(True)
+            self._set_login_btn_mode("scan")
 
     def _make_onebot_client(self) -> OneBotHTTPClient:
         """根据当前模式创建 OneBot HTTP 客户端"""
@@ -2398,6 +2465,62 @@ class MainWindow(QMainWindow):
         self.login_btn.setEnabled(True)
         self._append_log(f"[错误] {error}")
 
+    def _enter_offline_ui(self, reason: str):
+        """被踢下线/断连时恢复完整离线UI，保存断点"""
+        if self._onebot is None and not self._intersection:
+            return  # 已经离线，避免重复重置
+
+        # 中断发送线程并保存断点
+        was_sending = self._send_worker and self._send_worker.isRunning()
+        if was_sending:
+            self._send_worker.stop()
+            self._send_worker.quit()
+            self._send_worker.wait(500)
+        if self._recall_worker and self._recall_worker.isRunning():
+            self._recall_worker.stop()
+            self._recall_worker.quit()
+            self._recall_worker.wait(500)
+
+        self._stop_post_listener()
+        self._onebot = None
+        self._joined_groups.clear()
+        self._intersection.clear()
+
+        self.qr_label.clear()
+        self.qr_label.setText("连接已断开\n请重新登录")
+        self.qr_label.setStyleSheet(
+            "border: 2px dashed #8b4040; border-radius: 10px;"
+            "font-size: 14px; color: #c96a6a; background: transparent;"
+        )
+        self.login_status_label.setText(f"状态: {reason}")
+        self.status_online.setText("离线")
+        self.status_qq.setText("QQ: -")
+
+        self._csv_records.clear()
+        self.group_tree.clear()
+        self.group_selection_label.setText("已选: 0 / 0 群")
+        self.select_all_btn.setEnabled(False)
+        self.deselect_all_btn.setEnabled(False)
+        self.refresh_groups_btn.setEnabled(False)
+
+        self.logout_btn.setEnabled(False)
+        self._set_login_btn_mode("scan")
+
+        if was_sending:
+            self._append_log(f"[发送] 因{reason}中断，已保存断点", "warning")
+        self._send_btn_enabled(True)
+        self._append_log(f"[系统] {reason}，请重新登录", "error")
+
+        # 停 NapCat 并杀 QQ（账号失效，没有留着的意义）
+        if self._napcat:
+            self._napcat.stop(kill_qq=True)
+            self._napcat = None
+
+    def _on_kicked_offline(self):
+        """NapCat 检测到被踢下线 — 立即恢复离线UI"""
+        self._enter_offline_ui("被踢下线")
+        self._send_btn_enabled(True)
+
     def _on_logout_clicked(self):
         """退出登录：停一切，回到未登录状态"""
         self._login_poll_active = False
@@ -2449,20 +2572,35 @@ class MainWindow(QMainWindow):
             state_mgr.clear()
             return
 
-        reply = QMessageBox.question(
-            self, "断点续传",
+        # 检查是否同一账号
+        current_self_id = self._config_mgr.config.last_self_id or ""
+        if session.self_id and current_self_id and session.self_id != current_self_id:
+            # 不同账号的断点，自动清除
+            state_mgr.clear()
+            return
+
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("断点续传")
+        msg_box.setText(
             f"检测到上次未完成的发送会话：\n\n"
             f"已发送: {session.sent_index} / {session.total_count} 群\n"
             f"剩余: {remaining} 群\n"
             f"消息: 「{session.message[:60]}{'...' if len(session.message) > 60 else ''}」\n\n"
-            f"是否继续发送？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            f"是否继续发送？"
         )
+        btn_continue = msg_box.addButton("继续发送", QMessageBox.ButtonRole.AcceptRole)
+        btn_ignore = msg_box.addButton("忽略", QMessageBox.ButtonRole.DestructiveRole)
+        btn_cancel = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        msg_box.setDefaultButton(btn_continue)
+        msg_box.exec()
 
-        if reply != QMessageBox.StandardButton.Yes:
+        clicked = msg_box.clickedButton()
+        if clicked == btn_ignore:
             state_mgr.clear()
-            self._append_log("[发送] 已放弃上次未完成的会话")
+            self._append_log("[发送] 已忽略上次未完成的会话")
+            return
+        elif clicked != btn_continue:
+            self._append_log("[发送] 断点续传已取消，会话保留", "info")
             return
 
         self._append_log(f"[发送] 断点续传: 从第 {session.sent_index + 1} 个群继续...")
@@ -2871,7 +3009,7 @@ class MainWindow(QMainWindow):
         make_client = self._make_onebot_client
 
         class IntersectionWorker(QThread):
-            result_ready = pyqtSignal(set)
+            result_ready = pyqtSignal(set, dict)  # (joined_ids, {gid: name_from_bot})
             error_msg = pyqtSignal(str)
 
             def run(self):
@@ -2879,10 +3017,12 @@ class MainWindow(QMainWindow):
                     client = make_client()
                     groups = client.get_group_list()
                     ids = {str(g.get("group_id", "")) for g in groups}
-                    self.result_ready.emit(ids)
+                    name_map = {str(g.get("group_id", "")): str(g.get("group_name", ""))
+                                for g in groups if g.get("group_name")}
+                    self.result_ready.emit(ids, name_map)
                 except Exception as e:
                     self.error_msg.emit(str(e))
-                    self.result_ready.emit(set())
+                    self.result_ready.emit(set(), {})
 
         # 断开并停止前一个 worker
         if hasattr(self, "_worker") and self._worker is not None:
@@ -3344,6 +3484,24 @@ class MainWindow(QMainWindow):
             self._update_selection_count()
 
     # ---- 发送 ----
+    def _on_stop_send_clicked(self):
+        """手动终止正在进行的发送任务"""
+        if not self._send_worker or not self._send_worker.isRunning():
+            return
+
+        reply = QMessageBox.question(
+            self, "确认终止",
+            "确定要终止当前发送任务吗？\n"
+            "已发送的消息不受影响，剩余群聊将保存为断点。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._append_log("[发送] 用户手动终止", "warning")
+        self._send_worker.stop()
+
     def _on_send_clicked(self):
         """开始群发：收集当前转发列表中的群 → 确认 → 启动 SendWorker"""
         html = self.message_edit.toHtml()
@@ -3427,12 +3585,15 @@ class MainWindow(QMainWindow):
         total = len(self._last_sent_ids)
         nt_warning = ""
         if self._nt_timeout_groups:
-            nt_warning = (
-                f"\n注意: {len(self._nt_timeout_groups)}个群因NT超时无法撤回"
-                f"（消息已发出但未收到确认）:\n"
-                + "\n".join(f"  • {n}" for n in self._nt_timeout_groups)
-                + "\n"
-            )
+            parts = []
+            unknown = [n for n, v in self._nt_timeout_groups.items() if v == "状态不明"]
+            bare = [n for n, v in self._nt_timeout_groups.items() if v == ""]
+            if bare:
+                parts.append(f"• {len(bare)}个群无法撤回（NT超时无消息ID）:\n" + "\n".join(f"    {n}" for n in bare))
+            if unknown:
+                parts.append(f"• {len(unknown)}个群可能撤回失败（NT超时状态不明）:\n" + "\n".join(f"    {n}" for n in unknown))
+            if parts:
+                nt_warning = "\n注意: NT超时相关\n" + "\n".join(parts) + "\n"
         reply = QMessageBox.question(
             self, "确认撤回",
             f"将撤回已发送到 {total} 个群的消息。\n{nt_warning}\n确定撤回？",
@@ -3443,8 +3604,7 @@ class MainWindow(QMainWindow):
             self._send_btn_enabled(True)
             return
 
-        self._send_btn_enabled(False)
-        self._append_log(f"[撤回] 开始撤回 {total} 条消息...")
+        self._send_btn_enabled(False, stop_enabled=False)
 
         self._recall_worker = RecallWorker(
             sent_message_ids=dict(self._last_sent_ids),
@@ -3493,9 +3653,16 @@ class MainWindow(QMainWindow):
             self._append_log(f"> {group_name} ...")
         elif status == "ok":
             self._append_log(f"{group_name} - 成功", "success")
-        elif status == "ok(NT超时)":
-            self._append_log(f"{group_name} - 已发出(NT超时无法撤回)", "success")
-            self._nt_timeout_groups.append(group_name)
+        elif status.startswith("ok(NT超时"):
+            if "已确认" in status:
+                self._append_log(f"{group_name} - NT超时(已确认发出)", "success")
+                self._nt_timeout_groups[group_name] = "已确认"
+            elif "状态不明" in status:
+                self._append_log(f"{group_name} - NT超时(状态不明,可能被屏蔽)", "warning")
+                self._nt_timeout_groups[group_name] = "状态不明"
+            else:
+                self._append_log(f"{group_name} - NT超时(无消息ID,无法撤回)", "warning")
+                self._nt_timeout_groups[group_name] = ""
         elif status.startswith("fail:"):
             reason = status[5:]
             self._append_log(f"{group_name} - {reason}", "error")
@@ -3509,6 +3676,8 @@ class MainWindow(QMainWindow):
 
     def _on_send_completed(self, success: int, failed: int):
         """发送/撤回完成"""
+        if self._onebot is None:
+            return  # 已离线，忽略迟到的完成信号
         is_recall = self._recall_worker is not None
         self._send_btn_enabled(True)
         self.progress_bar.setValue(self.progress_bar.maximum())
@@ -3528,9 +3697,18 @@ class MainWindow(QMainWindow):
             if self._send_worker and hasattr(self._send_worker, "_engine") and self._send_worker._engine:
                 self._last_sent_ids = dict(self._send_worker._engine._sent_message_ids)
             if self._nt_timeout_groups:
+                confirmed = [n for n, v in self._nt_timeout_groups.items() if v == "已确认"]
+                unknown = [n for n, v in self._nt_timeout_groups.items() if v == "状态不明"]
+                bare = [n for n, v in self._nt_timeout_groups.items() if v == ""]
+                msgs = []
+                if bare:
+                    msgs.append(f"{len(bare)}个无法撤回")
+                if unknown:
+                    msgs.append(f"{len(unknown)}个状态不明")
+                if confirmed:
+                    msgs.append(f"{len(confirmed)}个已确认")
                 self._append_log(
-                    f"[注意] {len(self._nt_timeout_groups)}个群NT超时，消息已发出但无法撤回: "
-                    + ", ".join(self._nt_timeout_groups),
+                    f"[注意] NT超时: {', '.join(msgs)}",
                     "warning")
             self.status_last_send.setText(
                 f"上次发送: {datetime.now().strftime('%H:%M')} ({success}成功/{failed}失败)"
@@ -3553,6 +3731,10 @@ class MainWindow(QMainWindow):
                 else {}
             self._send_worker = None
             return
+
+        if self._onebot is None:
+            self._send_worker = None
+            return  # 已离线，忽略迟到的中断信号
 
         self._send_btn_enabled(True)
         self.progress_bar.setValue(0)
@@ -3640,10 +3822,13 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._append_log(f"回复失败: {e}", "error")
 
-    def _send_btn_enabled(self, enabled: bool):
+    def _send_btn_enabled(self, enabled: bool, stop_enabled: bool | None = None):
         """设置发送相关按钮状态"""
+        if stop_enabled is None:
+            stop_enabled = not enabled
         self.send_btn.setEnabled(enabled)
         self.recall_btn.setEnabled(enabled)
+        self.stop_send_btn.setEnabled(stop_enabled)
 
     def _on_message_changed(self):
         """文本变化 -> 更新字数"""

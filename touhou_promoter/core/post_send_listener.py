@@ -95,6 +95,7 @@ class PostSendListener(QThread):
 
     def run(self):
         self._start_ts = time.time()
+        _error_count = 0
 
         def on_msg(data: dict):
             elapsed = time.time() - self._start_ts
@@ -109,7 +110,6 @@ class PostSendListener(QThread):
 
             raw_message = data.get("raw_message", "") or data.get("message", "")
             if isinstance(raw_message, list):
-                # OneBot segment array → CQ code string
                 raw_message = _segments_to_cq(raw_message)
 
             sender = data.get("sender", {})
@@ -120,25 +120,18 @@ class PostSendListener(QThread):
             )
             sender_user_id = str(sender.get("user_id", ""))
 
-            # 捕获原始消息ID（用于回复时构造 [CQ:reply,id=xxx]）
             message_id = str(data.get("message_id", ""))
 
-            # 检查是否 @Bot
             at_bot = f"[CQ:at,qq={self._self_id}]" in raw_message
-
-            # 检查是否回复（有人右键回复Bot消息）
             is_reply = "[CQ:reply" in raw_message
 
-            # 检查关键词
             msg_lower = raw_message.lower()
             keyword_match = any(kw in msg_lower for kw in self.KEYWORDS)
 
             if at_bot or keyword_match or is_reply:
-                # 过滤纯 @ 噪音（没有实质文本内容），但回复消息不过滤
                 if not is_reply and at_bot and not keyword_match and not _has_meaningful_text(raw_message):
                     return
 
-                # 尝试从事件数据中获取群名
                 group_name = data.get("group_name", "") or ""
                 if not group_name:
                     ginfo = data.get("group_info", {}) or {}
@@ -148,7 +141,15 @@ class PostSendListener(QThread):
                 self.hit_detected.emit(group_id, group_name, sender_nick, raw_message, int(elapsed), message_id, sender_user_id)
 
         def on_ws_error(err: str):
-            self.ws_error.emit(err)
+            nonlocal _error_count
+            _error_count += 1
+            if _error_count <= 5:
+                self.ws_error.emit(err)
+            if _error_count == 5:
+                self.ws_error.emit("监听器连续连接失败，已停止（请检查QQ是否在线）")
+            if _error_count >= 5:
+                if self._listener:
+                    self._listener.stop()
 
         self._listener = OneBotWSListener(ws_url=self._ws_url)
         self._listener.on_group_message = on_msg

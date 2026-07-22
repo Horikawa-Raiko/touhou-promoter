@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, asdict
 class SendSession:
     """一次群发会话的完整状态"""
     session_id: str = ""                       # 会话ID（时间戳）
+    self_id: str = ""                          # 登录账号（区分不同账号的断点）
     message: str = ""                          # 发送的消息内容
     target_group_ids: list[str] = field(default_factory=list)  # 目标群号列表
     sent_index: int = 0                        # 已发送到的索引（下一个要发的）
@@ -53,6 +54,7 @@ class SendStateManager:
 
         session = SendSession(
             session_id=data.get("session_id", ""),
+            self_id=data.get("self_id", ""),
             message=data.get("message", ""),
             target_group_ids=data.get("target_group_ids", []),
             sent_index=data.get("sent_index", 0),

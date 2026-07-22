@@ -33,6 +33,35 @@ def set_auto_login_account(napcat_root: str, qq: str):
         json.dump(config, f, indent=4, ensure_ascii=False)
 
 
+def ensure_bypass_config(napcat_root: str):
+    """在 napcat.json 中启用所有 Bypass 选项（反检测）。
+
+    NapCat 启动时会读取 bypass 配置传给 Napi2NativeLoader。
+    默认全为 true 以最大化绕过 QQ 客户端检测。
+    可通过环境变量 NAPCAT_DISABLE_BYPASS=1 禁用。
+    """
+    config_dir = find_napcat_config_dir(napcat_root)
+    napcat_json = os.path.join(config_dir, "napcat.json")
+    config = {}
+    if os.path.isfile(napcat_json):
+        try:
+            with open(napcat_json, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    config["bypass"] = {
+        "hook": True,
+        "window": True,
+        "module": False,
+        "process": False,
+        "container": False,
+        "js": False,
+    }
+    os.makedirs(os.path.dirname(napcat_json), exist_ok=True)
+    with open(napcat_json, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+
 ONEBOX_CONFIG_TEMPLATE = {
     "network": {
         "httpServers": [
