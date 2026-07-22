@@ -792,7 +792,7 @@ fetch('/version.json?' + Date.now(), {cache: 'no-store'})
     document.getElementById('app-version').textContent = 'v' + (data.app_version || '1.0') + ' · ~40MB · 免安装';
   })
   .catch(() => {
-    document.getElementById('app-version').textContent = 'v1.0 · ~40MB · 免安装';
+    document.getElementById('app-version').textContent = 'v1.0.6 · ~40MB · 免安装';
   });
 
 // FAQ accordion
