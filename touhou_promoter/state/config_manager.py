@@ -14,6 +14,8 @@ class AppConfig:
     send_interval_jitter: float = 0.1        # 间隔抖动（秒）
     batch_pause_every: int = 10              # 每N条暂停一次
     batch_pause_seconds: int = 5             # 暂停秒数
+    nt_timeout_retries: int = 2              # NT超时无message_id时重试次数
+    nt_timeout_retry_delay: float = 8.0      # NT超时重试间隔（秒）
     recall_interval: float = 0.6             # 撤回间隔（秒）
     listener_expiry_seconds: int = 1200      # 发送后监听过期时间（秒），默认20分钟
     last_self_id: str = ""                   # 上次登录的QQ号

@@ -2,6 +2,7 @@
 import hashlib
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -1488,6 +1489,7 @@ class MainWindow(QMainWindow):
         self._image_paths: list[str] = []  # ordered list of image file paths
         self._b64_to_path: dict[str, str] = {}  # base64 data -> file path mapping
         self._pending_breakpoint_gids: list[str] = []  # 断点续传时待勾选的群号
+        self._pending_breakpoint_check: bool = False  # 登录后等交集就绪再做断点检查
         self._dark_mode = self._config_mgr.config.dark_mode
         self._recalling = False                     # 撤回流程中，抑制 send_interrupted 的 UI 操作
         # OneBot 模式: "managed" = App管理NapCat进程 / "external" = 用户自启动
@@ -1739,8 +1741,8 @@ class MainWindow(QMainWindow):
         me_btn_row.addWidget(self.recall_btn)
         me_btn_row.addWidget(self.stop_send_btn)
 
-        # 编辑区右下角叠加标签（浮在文本上方）
-        self._editor_overlay = QFrame(self.message_edit.viewport())
+        # 编辑区右下角叠加标签（浮在文本上方，父控件为编辑器本身不随内容滚动）
+        self._editor_overlay = QFrame(self.message_edit)
         self._editor_overlay.setObjectName("editorOverlay")
         full_info = (
             f"发送间隔 {self._config_mgr.config.send_interval}s，"
@@ -1763,6 +1765,8 @@ class MainWindow(QMainWindow):
         ol.addWidget(self.interval_label)
         ol.addWidget(self.target_label)
         self._position_editor_overlay()
+        self.message_edit.verticalScrollBar().valueChanged.connect(self._position_editor_overlay)
+        self.message_edit.horizontalScrollBar().valueChanged.connect(self._position_editor_overlay)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
@@ -1850,6 +1854,7 @@ class MainWindow(QMainWindow):
         st.send_progress.connect(self._on_send_progress)
         st.send_completed.connect(self._on_send_completed)
         st.send_interrupted.connect(self._on_send_interrupted)
+        st.send_error.connect(self._on_send_thread_error)
         st.kicked_offline.connect(self._on_kicked_offline)
 
     def _on_onebot_ready(self, http_port: int, ws_port: int):
@@ -2003,7 +2008,8 @@ class MainWindow(QMainWindow):
             self._set_login_btn_mode("online")
             self._append_log(f"[登录] 登录成功! {info}")
             self._auto_refresh_intersection()
-            self._check_breakpoint_resume()
+            # 断点检查延迟到 _on_intersection_ready（树建好后再弹窗）
+            self._pending_breakpoint_check = True
         else:
             # 快登失败降级扫码 → 特殊处理，不重置整个UI
             if self._quick_login_attempting and "快速登录失败" in info:
@@ -2014,9 +2020,8 @@ class MainWindow(QMainWindow):
                 self._quick_login_mode = False
                 if self._quick_login_accounts and self._napcat and self._napcat.is_running() and self._onebot is None:
                     self._render_inline_quick_login_buttons(self._quick_login_accounts)
-            elif "被踢下线" in info or "异常退出" in info:
-                # _enter_offline_ui 已由 _on_kicked_offline / _on_setup_failed 处理
-                pass
+            elif "被踢下线" in info:
+                pass  # _enter_offline_ui 已在 _on_kicked_offline 中处理
             else:
                 # 其他离线原因 → 完整离线UI
                 self._enter_offline_ui(info)
@@ -2050,6 +2055,11 @@ class MainWindow(QMainWindow):
         self._list_store.sync_default_list(intersection_dict)
         self._list_persistence.save(self._list_store)
         self._refresh_list_ui()
+
+        # 登录后首次交集就绪 → 检查断点续传（树已建好，弹窗前显示正确的勾选状态）
+        if self._pending_breakpoint_check:
+            self._pending_breakpoint_check = False
+            self._check_breakpoint_resume()
 
     # ================================================================
     # UI 控件事件
@@ -2480,10 +2490,12 @@ class MainWindow(QMainWindow):
             self._send_worker.stop()
             self._send_worker.quit()
             self._send_worker.wait(500)
+            self._send_worker = None
         if self._recall_worker and self._recall_worker.isRunning():
             self._recall_worker.stop()
             self._recall_worker.quit()
             self._recall_worker.wait(500)
+            self._recall_worker = None
 
         self._stop_post_listener()
         self._onebot = None
@@ -2592,9 +2604,11 @@ class MainWindow(QMainWindow):
         # 恢复消息内容到编辑器（弹窗之前，确保关了弹窗也能手动发）
         self._restore_message_to_editor(session.message)
 
-        # 记录未发送的群号，等树建完后自动勾选
+        # 记录未发送的群号并立即更新树勾选（弹窗前显示正确状态）
         unsent_gids = session.target_group_ids[session.sent_index:]
         self._pending_breakpoint_gids = [gid for gid in unsent_gids]
+        if self._intersection:
+            self._select_groups_in_tree(set(self._pending_breakpoint_gids))
 
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("断点续传")
@@ -2621,12 +2635,19 @@ class MainWindow(QMainWindow):
             self._append_log("[发送] 断点续传已取消，消息和群选择已保留", "info")
             return
 
-        self._pending_breakpoint_gids = []
         self._append_log(f"[发送] 断点续传: 已成功 {session.success_count}/{session.total_count}，继续未完成的...")
 
         # 重建 targets：排除已成功发送的群，失败和未发的重试
         ok_names = {name for name, info in session.results.items()
                     if isinstance(info, dict) and info.get("status") == "ok"}
+        # 从已成功群名中提取 gid（如 "群名(123456)" → "123456"），
+        # 防止 _csv_records 尚未加载时纯 gid 匹配失效
+        ok_gids = set()
+        for ok_name in ok_names:
+            m = re.search(r'\((\d+)\)$', ok_name)
+            if m:
+                ok_gids.add(m.group(1))
+
         targets = []
         for gid in session.target_group_ids:
             name = gid
@@ -2634,13 +2655,17 @@ class MainWindow(QMainWindow):
                 if r.group_id == gid:
                     name = r.group_name or gid
                     break
-            if name not in ok_names:
+            if name not in ok_names and gid not in ok_gids:
                 targets.append((gid, name))
 
         if not targets:
             self._append_log("[发送] 所有群已发送完成，清除会话")
             state_mgr.clear()
             return
+
+        # 通知树只勾选本次要发的群（树已在弹窗期间建好，直接更新）
+        self._pending_breakpoint_gids = [gid for gid, _ in targets]
+        self._select_groups_in_tree(set(self._pending_breakpoint_gids))
 
         self._send_btn_enabled(False)
         self._send_worker = SendWorker(
@@ -3787,6 +3812,13 @@ class MainWindow(QMainWindow):
         )
         self._send_worker = None
 
+    def _on_send_thread_error(self, error: str):
+        """发送线程异常 — 恢复UI并记录"""
+        self._send_btn_enabled(True)
+        self.progress_bar.reset()
+        self._append_log(f"[错误] {error}", "error")
+        self._send_worker = None
+
     def _start_post_send_listener(self):
         """发送完成后启动回复监听（如果配置了监听时长）。
 
@@ -4074,12 +4106,13 @@ class MainWindow(QMainWindow):
             self._update_interval_label()
 
     def _position_editor_overlay(self):
-        """将叠加标签定位到编辑区右下角"""
+        """将叠加标签定位到编辑区可视区域右下角"""
         if not hasattr(self, '_editor_overlay') or not self._editor_overlay:
             return
         vp = self.message_edit.viewport()
+        ox, oy = vp.pos().x(), vp.pos().y()
         w, h = vp.width(), vp.height()
-        self._editor_overlay.setGeometry(w - 190, h - 26, 182, 24)
+        self._editor_overlay.setGeometry(ox + w - 190, oy + h - 26, 182, 24)
         self._editor_overlay.raise_()
 
     def resizeEvent(self, event):

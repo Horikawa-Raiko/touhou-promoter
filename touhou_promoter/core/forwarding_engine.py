@@ -91,12 +91,16 @@ class ForwardingEngine:
         jitter: float = 0.1,
         batch_pause_every: int = 10,
         batch_pause_seconds: int = 5,
+        nt_timeout_retries: int = 2,
+        nt_timeout_retry_delay: float = 3.0,
     ):
         self._client = client
         self._interval = interval
         self._jitter = jitter
         self._batch_pause_every = batch_pause_every
         self._batch_pause_seconds = batch_pause_seconds
+        self._nt_timeout_retries = nt_timeout_retries
+        self._nt_timeout_retry_delay = nt_timeout_retry_delay
 
         # 运行时状态
         self._stop_flag = False
@@ -197,7 +201,7 @@ class ForwardingEngine:
                     raw = getattr(e, "raw", None)
                     nt_msg_id = ""
                     if isinstance(raw, dict):
-                        nt_msg_id = str(raw.get("data", {}).get("message_id", ""))
+                        nt_msg_id = str((raw.get("data") or {}).get("message_id", ""))
                     # 回查确认消息是否真的发出
                     confirmed = False
                     if nt_msg_id:
@@ -219,10 +223,62 @@ class ForwardingEngine:
                         if self.on_progress:
                             self.on_progress(i + 1, total, group_name, "ok(NT超时,状态不明)")
                     else:
-                        # 没有 message_id — 只信任基本逻辑
-                        success += 1
-                        if self.on_progress:
-                            self.on_progress(i + 1, total, group_name, "ok(NT超时)")
+                        # data 为 null，NapCat 未能提交消息到 NT 内核。
+                        # QQ 刚重启时消息通道可能尚未就绪，重试几次。
+                        retried = 0
+                        retry_ok = False
+                        while retried < self._nt_timeout_retries and not self._stop_flag:
+                            retried += 1
+                            if self.on_progress:
+                                hint = "，内核预热中请稍候" if retried == 1 else ""
+                                self.on_progress(i + 1, total, group_name,
+                                                 f"NT超时(重试{retried}/{self._nt_timeout_retries}{hint})")
+                            # 小片睡眠，随时响应 stop_flag
+                            wait_remaining = self._nt_timeout_retry_delay
+                            while wait_remaining > 0 and not self._stop_flag:
+                                chunk = min(0.5, wait_remaining)
+                                time.sleep(chunk)
+                                wait_remaining -= chunk
+                            if self._stop_flag:
+                                break
+                            try:
+                                result2 = self._client.send_group_msg(group_id, segments, auto_escape=False)
+                                msg_id2 = str(result2.get("message_id", ""))
+                                if msg_id2:
+                                    self._sent_message_ids[group_id] = msg_id2
+                                    success += 1
+                                    retry_ok = True
+                                    if self.on_progress:
+                                        self.on_progress(i + 1, total, group_name, "ok(重试成功)")
+                                    break
+                                # 返回了响应但没有 message_id — 再试
+                            except OneBotAPIError as e2:
+                                if is_likely_offline_error(str(e2)):
+                                    if self.on_progress:
+                                        self.on_progress(i + 1, total, group_name, "fail:掉线")
+                                    if self.on_stopped:
+                                        self.on_stopped(success, total, dict(self._sent_message_ids))
+                                    return False
+                            except Exception as exc:
+                                if is_likely_offline_error(str(exc)):
+                                    if self.on_progress:
+                                        self.on_progress(i + 1, total, group_name, "fail:掉线")
+                                    if self.on_stopped:
+                                        self.on_stopped(success, total, dict(self._sent_message_ids))
+                                    return False
+                            # 单次重试失败后立即检查 stop
+                            if self._stop_flag:
+                                break
+                        if self._stop_flag:
+                            # 被用户取消/离线中断，不算失败
+                            if self.on_stopped:
+                                self.on_stopped(success, total, dict(self._sent_message_ids))
+                            return False
+                        if not retry_ok:
+                            failed += 1
+                            if self.on_progress:
+                                self.on_progress(i + 1, total, group_name,
+                                                 f"fail:NT超时(重试{retried}次后仍失败)")
                 # ── HTTP 连接失败：消息未发出 ──
                 elif "HTTP请求失败" in reason or "Connection" in reason or "Max retries" in reason:
                     # 检查是否掉线

@@ -42,6 +42,25 @@ class SendWorker(QThread):
         self._state_mgr = SendStateManager()
 
     def run(self):
+        try:
+            self._run()
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            self._state.send_error.emit(f"发送线程异常: {e}\n{tb}")
+            self._state.send_interrupted.emit(0)
+            try:
+                SendStateManager().save(SendSession(
+                    session_id=str(int(__import__("time").time())),
+                    self_id=str(getattr(self._config, "last_self_id", "")),
+                    message=self._message if isinstance(self._message, str) else str(self._message),
+                    target_group_ids=[gid for gid, _ in self._targets],
+                    total_count=len(self._targets),
+                ))
+            except Exception:
+                pass
+
+    def _run(self):
         self._probe_nt_ready()
 
         self._engine = ForwardingEngine(
@@ -50,6 +69,8 @@ class SendWorker(QThread):
             jitter=self._config.send_interval_jitter,
             batch_pause_every=self._config.batch_pause_every,
             batch_pause_seconds=self._config.batch_pause_seconds,
+            nt_timeout_retries=self._config.nt_timeout_retries,
+            nt_timeout_retry_delay=self._config.nt_timeout_retry_delay,
         )
 
         # 绑定引擎回调 → AppState 信号
@@ -111,7 +132,7 @@ class SendWorker(QThread):
                 total_count=total,
             )
         session.sent_index = current
-        if (status == "ok" or status.startswith("ok(NT超时")) and self._engine:
+        if self._engine and (status == "ok" or status.startswith("ok(NT超时")):
             session.success_count = self._engine._sent_message_ids.__len__() if hasattr(self._engine, "_sent_message_ids") else current
             session.results[group_name] = {"status": "ok", "message_id": self._engine._sent_message_ids.get(group_name, "")}
         state_mgr.save(session)
@@ -125,8 +146,9 @@ class SendWorker(QThread):
         )
 
     def _on_finished(self, success: int, failed: int, sent_ids: dict[str, str]):
-        # 清除持久化状态
-        SendStateManager().clear()
+        # 全部成功才清除持久化状态，有失败的保留以供断点恢复
+        if failed == 0:
+            SendStateManager().clear()
         self._state.send_completed.emit(success, failed)
 
     def _on_stopped(self, sent: int, total: int, sent_ids: dict[str, str]):
