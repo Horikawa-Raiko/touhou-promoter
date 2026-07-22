@@ -33,7 +33,7 @@ class SendWorker(QThread):
         self._message = message
         self._targets = targets
         self._start_index = start_index
-        self._client = client or OneBotHTTPClient(timeout=60.0)
+        self._client = client or OneBotHTTPClient(timeout=30.0)
         self._config = ConfigManager().config
 
         self._engine: Optional[ForwardingEngine] = None
